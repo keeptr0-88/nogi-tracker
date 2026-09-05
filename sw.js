@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sublog-nogi-v13';
+const CACHE_NAME = 'sublog-nogi-v15';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -6,6 +6,7 @@ const ASSETS_TO_CACHE = [
   './app.js',
   './qrcode.min.js',
   './lz-string.min.js',
+  './jsqr.min.js',
   './manifest.json',
   './icons/icon.svg',
   './icons/icon-192.png',

@@ -300,6 +300,12 @@
         <button type="button" id="openSyncModalCardBtn" class="btn-primary" style="background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%); padding: 13px; font-size: 0.9rem; box-shadow: 0 4px 16px rgba(2, 132, 199, 0.35);">
           Mostra QR Code di Sincronizzazione
         </button>
+        <button type="button" id="openScanBtn" class="btn-primary" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); padding: 13px; font-size: 0.9rem; box-shadow: 0 4px 16px rgba(5, 150, 105, 0.35); margin-top: 10px;">
+          📷 Scansiona QR con questa app
+        </button>
+        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px; line-height: 1.4;">
+          Usi l'icona sulla Home? Scansiona da qui: i dati arrivano direttamente nell'app, senza passare da Safari.
+        </p>
 
         <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(56, 189, 248, 0.2);">
           <div style="font-size: 0.76rem; font-weight: 700; color: #38BDF8; margin-bottom: 6px;">
@@ -435,14 +441,21 @@
       <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.4;">
         Apri la <strong>Fotocamera</strong> del tuo iPhone e inquadra i codici in ordine per trasferire tutti i tap salvati:
       </p>
+
+      <div id="syncBrowserWarn" style="display: none; background: rgba(239,68,68,0.12); border: 1px solid #EF4444; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 0.78rem; line-height: 1.45; color: #F8FAFC; text-align: left;">
+        ⚠️ Stai usando un browser secondario (es. WhatsApp o Chrome): i tap sincronizzati <strong>non</strong> appariranno nella tua app. Apri SUB-LOG in <strong>Safari</strong> (o dall'icona Home) e rifai il sync da lì.
+      </div>
       
       <div id="qrcodeContainer" style="display: flex; justify-content: center; margin-bottom: 16px; padding: 12px; background: #FFF; border-radius: 16px; width: fit-content; margin-left: auto; margin-right: auto; box-shadow: 0 4px 15px rgba(255,255,255,0.1);"></div>
 
       <button type="button" id="copySyncLinkBtn" class="cat-chip" style="width: 100%; background: #1E293B; color: #38BDF8; border-color: #38BDF8; padding: 12px; font-weight: 800; margin-bottom: 6px; cursor: pointer;">
         📋 Copia Link di Sincronizzazione
       </button>
+      <button type="button" id="copySyncCodeBtn" class="cat-chip" style="width: 100%; background: #1E293B; color: #FFF; border-color: #334155; padding: 12px; font-weight: 800; margin-bottom: 6px; cursor: pointer;">
+        🔑 Copia Codice (da incollare in Info → Importa)
+      </button>
       <div id="syncLinkCopyFeedback" style="font-size: 0.75rem; color: #34D399; display: none; margin-top: 4px; font-weight: 600;">
-        ✅ Link copiato! Mandalo su WhatsApp o AirDrop.
+        ✅ Link copiato! Aprilo in Safari (non dentro WhatsApp/Chrome).
       </div>
     </div>
   </div>
@@ -486,9 +499,21 @@
     </div>
   </div>
 
+  <!-- QR Scanner Overlay -->
+  <div id="scanOverlay" role="dialog" aria-modal="true" aria-label="Scansiona QR di sincronizzazione" style="display: none; position: fixed; inset: 0; background: #000; z-index: 3000; flex-direction: column;">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: calc(env(safe-area-inset-top, 12px) + 8px) 16px 12px; background: rgba(0,0,0,0.7);">
+      <div style="color: #FFF; font-weight: 800; font-size: 1rem;">Scansiona QR</div>
+      <button type="button" id="closeScanBtn" aria-label="Chiudi scanner" style="background: #1E293B; border: 1px solid #334155; color: #FFF; font-size: 1.4rem; line-height: 1; width: 40px; height: 40px; border-radius: 12px; cursor: pointer;">&times;</button>
+    </div>
+    <video id="scanVideo" playsinline muted autoplay style="width: 100%; flex: 1; min-height: 0; object-fit: cover; background: #000;"></video>
+    <canvas id="scanCanvas" style="display: none;"></canvas>
+    <div id="scanProgress" style="padding: 14px 16px calc(env(safe-area-inset-bottom, 12px) + 10px); background: rgba(0,0,0,0.7); color: #FFF; text-align: center; font-size: 0.9rem; font-weight: 700;">Inquadra un QR di SUB-LOG…</div>
+  </div>
+
   <!-- QR Code Library & App Script -->
   <script src="./qrcode.min.js"></script>
   <script src="./lz-string.min.js"></script>
+  <script src="./jsqr.min.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

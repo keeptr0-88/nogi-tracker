@@ -8,7 +8,7 @@ PWA per registrare le sottomissioni messe a segno in allenamento (No-Gi / BJJ), 
 - **Stats** — totale, signature move, distribuzione per cinture e categorie, mappa di attività a 18 settimane, stat card condivisibile (PNG 1080x1350).
 - **Trofei** — 56 obiettivi (volumi, cacciatori di cinture, specialisti di tecnica, streak, varietà).
 - **Storico** — cronologia con ricerca e filtro per cintura; ogni voce è modificabile o cancellabile.
-- **Sync PC ⇄ telefono** — QR code generato in locale, senza server. Dataset piccoli: un QR solo. Dataset grandi: QR multipli in sequenza (`?syncpart=`, ~1100 caratteri l'uno, accumulati sul ricevente fino al completamento). Alternative: copia-link o backup JSON.
+- **Sync PC ⇄ telefono** — QR code generato in locale, senza server. Dataset piccoli: un QR solo. Dataset grandi: QR multipli in sequenza (`?syncpart=`, ~1100 caratteri l'uno, accumulati sul ricevente fino al completamento). Chi usa l'icona Home su iPhone (storage isolato da Safari) può scansionare direttamente **dentro l'app** con “Scansiona QR”. Alternative: copia-link, copia-codice o backup JSON.
 - **Backup** — export JSON o CSV (compatibile Excel), import JSON, o condivisione diretta via Web Share (AirDrop) con fallback al download.
 
 ## Uso in locale
@@ -18,10 +18,18 @@ Serve solo un server statico qualsiasi, ad esempio:
 ```bash
 npx serve .
 # oppure
-python3 -m http http.server 8000
+python3 -m http.server 8000
 ```
 
 Poi apri `http://localhost:8000`. Aprire `index.html` via `file://` non è supportato (service worker e moduli richiedono HTTP).
+
+## Test
+
+```bash
+node --test tests/
+```
+
+I test (`node:test`, zero dipendenze) estraggono le funzioni pure da `app.js` e coprono codec di sync, sanitizer, badge, frammenti multi-QR e utility. Girano anche in CI su ogni push.
 
 ## Deploy
 

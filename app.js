@@ -926,6 +926,20 @@ function setupEventListeners() {
     openSyncCardBtn.addEventListener('click', openSyncModal);
   }
 
+  // In-app QR scanner (hidden where camera/decoding is unavailable)
+  const openScanBtn = document.getElementById('openScanBtn');
+  if (openScanBtn) {
+    if (isScanSupported()) {
+      openScanBtn.addEventListener('click', openScanner);
+    } else {
+      openScanBtn.style.display = 'none';
+    }
+  }
+  const closeScanBtn = document.getElementById('closeScanBtn');
+  if (closeScanBtn) {
+    closeScanBtn.addEventListener('click', closeScanner);
+  }
+
   const closeSyncBtn = document.getElementById('closeSyncModalBtn');
   const syncModal = document.getElementById('syncModal');
   if (closeSyncBtn && syncModal) {
@@ -942,6 +956,11 @@ function setupEventListeners() {
   const copySyncLinkBtn = document.getElementById('copySyncLinkBtn');
   if (copySyncLinkBtn) {
     copySyncLinkBtn.addEventListener('click', handleCopySyncLink);
+  }
+
+  const copySyncCodeBtn = document.getElementById('copySyncCodeBtn');
+  if (copySyncCodeBtn) {
+    copySyncCodeBtn.addEventListener('click', copySyncCode);
   }
 
   const manualSyncBtn = document.getElementById('manualSyncBtn');
@@ -2185,29 +2204,168 @@ function parseSyncPartParam(val) {
   return { transferId: m[1], idx: parseInt(m[2], 10), total: parseInt(m[3], 10), chunk: m[4] };
 }
 
-function handleIncomingPart(part, useRender) {
-  if (!part) {
-    showToast('⚠️ Codice di trasferimento non valido!');
-    return;
+function hasSyncPart(transferId, idx) {
+  try {
+    const entry = JSON.parse(localStorage.getItem(PARTS_PREFIX + transferId));
+    return !!(entry && entry.parts && entry.parts[idx] !== undefined);
+  } catch (_) {
+    return false;
   }
+}
+
+// Shared by URL auto-import, manual paste and the in-app scanner.
+// Returns {status:'invalid'} | {status:'progress',received,total} |
+// {status:'complete',data} | {status:'error'} — no UI side effects.
+function ingestPart(part) {
+  if (!part) return { status: 'invalid' };
   const res = storeSyncPart(part.transferId, part.idx, part.total, part.chunk);
-  if (!res) {
-    showToast('⚠️ Frammento non valido!');
-    return;
-  }
+  if (!res) return { status: 'invalid' };
   if (res.assembled === null) {
-    showToast(`📥 Frammento ${res.received}/${res.total} ricevuto — scansiona il successivo`);
-    triggerHaptic();
-    return;
+    return { status: 'progress', received: res.received, total: res.total };
   }
   try {
-    const data = decodeSyncPayload(res.assembled);
-    if (useRender) applySyncData(data);
-    else applySyncDataWithoutRender(data);
+    return { status: 'complete', data: decodeSyncPayload(res.assembled) };
   } catch (err) {
     console.error('Errore assemblaggio trasferimento:', err);
-    showToast('⚠️ Trasferimento danneggiato, riprova da capo');
+    return { status: 'error' };
   }
+}
+
+function handleIncomingPart(part, useRender) {
+  const r = ingestPart(part);
+  if (r.status === 'invalid') {
+    showToast('⚠️ Frammento non valido!');
+    return null;
+  }
+  if (r.status === 'progress') {
+    showToast(`📥 Frammento ${r.received}/${r.total} ricevuto — scansiona il successivo`);
+    triggerHaptic();
+    return 0;
+  }
+  if (r.status === 'error') {
+    showToast('⚠️ Trasferimento danneggiato, riprova da capo');
+    return null;
+  }
+  if (useRender) {
+    applySyncData(r.data);
+    return null; // toasts handled by applySyncData
+  }
+  return applySyncDataWithoutRender(r.data);
+}
+
+// iOS gives every browser/webview its own private storage silo: a link
+// opened inside WhatsApp, Chrome iOS, Telegram, etc. applies the sync
+// there — and the SUB-LOG app in Safari/PWA never sees it. Only Safari
+// (or the installed PWA) shares the app's storage.
+function isIosDevice() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+}
+
+function isNonSafariIosBrowser() {
+  if (!isIosDevice()) return false;
+  if (typeof navigator !== 'undefined' && navigator.standalone) return false; // installed PWA: correct place
+  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+  // In-app webviews
+  if (/WhatsApp|FBAN|FBAV|Instagram|Telegram|Gmail|GSA|Line|Viber|Snapchat|TikTok|MicroMessenger|Weibo|Pinterest|Slack|Discord|Messenger|FB_IAB|KAKAOTALK/i.test(ua)) return true;
+  // Other iOS browsers keep storage separate from Safari
+  if (/CriOS|FxiOS|EdgiOS|OPiOS|Brave|DuckDuckGo/i.test(ua)) return true;
+  return false;
+}
+
+function updateSyncBrowserWarn() {
+  const warn = document.getElementById('syncBrowserWarn');
+  if (!warn) return;
+  warn.style.display = isNonSafariIosBrowser() ? 'block' : 'none';
+}
+
+// Copy just the data payload (no URL): paste it into Info → Importa
+// inside Safari/the installed app. Works across browser silos and has
+// no URL-length limits.
+function copySyncCode() {
+  if (logs.length === 0) {
+    showToast('⚠️ Non ci sono tap registrati da sincronizzare!');
+    return;
+  }
+  let code;
+  try {
+    code = encodeSyncPayload({ logs, customTechs });
+  } catch (e) {
+    showToast('⚠️ Errore nella generazione del codice!');
+    return;
+  }
+  copyTextToClipboard(code).then(() => {
+    showToast('📋 Codice copiato! Incollalo in Info → Importa.');
+  }).catch(() => {
+    prompt('Copia questo codice e incollalo in Info → Importa:', code);
+  });
+}
+
+// Dismissible notice card with copy-code + close actions.
+// Shown when sync data lands somewhere the user might not expect.
+function showNoticeCard(title, body) {
+  if (document.getElementById('transferNotice')) return null;
+  const banner = document.createElement('div');
+  banner.id = 'transferNotice';
+  banner.setAttribute('role', 'alert');
+  banner.style.cssText = 'background: rgba(239,68,68,0.12); border: 1px solid #EF4444; border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; font-size: 0.8rem; line-height: 1.45; color: #F8FAFC;';
+
+  const titleEl = document.createElement('div');
+  titleEl.style.cssText = 'font-weight: 800; margin-bottom: 4px;';
+  titleEl.textContent = title;
+
+  const bodyEl = document.createElement('div');
+  bodyEl.style.cssText = 'color: var(--text-secondary); margin-bottom: 10px;';
+  bodyEl.textContent = body;
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display: flex; gap: 8px;';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'cat-chip';
+  copyBtn.style.cssText = 'cursor: pointer; font-weight: 800;';
+  copyBtn.textContent = '📋 Copia codice';
+  copyBtn.addEventListener('click', copySyncCode);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'cat-chip';
+  closeBtn.style.cssText = 'cursor: pointer;';
+  closeBtn.textContent = 'Chiudi';
+  closeBtn.setAttribute('aria-label', 'Chiudi avviso');
+  closeBtn.addEventListener('click', () => banner.remove());
+
+  row.append(copyBtn, closeBtn);
+  banner.append(titleEl, bodyEl, row);
+  const host = document.querySelector('.app-container');
+  if (host) host.prepend(banner);
+  else document.body.prepend(banner);
+  return banner;
+}
+
+// Shown when sync data landed in a wrong-browser silo: explains where the
+// data went and how to move it into the real app.
+function maybeShowWrongBrowserBanner(added) {
+  if (!added || !isNonSafariIosBrowser()) return;
+  showNoticeCard(
+    '⚠️ Dati arrivati nel browser sbagliato',
+    'Hai aperto il link dentro un\u2019altra app (es. WhatsApp o Chrome): i tap sono salvati lì, non nella tua SUB-LOG. Aprili in Safari, oppure copiali con il pulsante qui sotto e incollali in Info → Importa.'
+  );
+}
+
+// iPhone cameras always open links in Safari — but the installed Home-icon
+// app is a separate, isolated storage silo. When data lands in Safari,
+// offer the bridge into the Home app.
+function maybeShowSafariBridgeNotice(added) {
+  if (!added || !isIosDevice() || isNonSafariIosBrowser()) return;
+  if (typeof navigator !== 'undefined' && navigator.standalone) return;
+  showNoticeCard(
+    '📥 Dati ricevuti in Safari',
+    'Se usi SUB-LOG dall\u2019icona sulla Home, questi tap sono solo in Safari e non nell\u2019app: tocca 📋 Copia codice qui sotto, apri l\u2019icona Home → Info → Importa e incollalo. Oppure scansiona i QR direttamente dall\u2019app con “Scansiona QR”.'
+  );
 }
 
 function checkUrlForSyncData() {
@@ -2218,7 +2376,9 @@ function checkUrlForSyncData() {
     const partParams = new URLSearchParams(window.location.search);
     const partVal = partParams.get('syncpart');
     if (partVal) {
-      handleIncomingPart(parseSyncPartParam(partVal), false);
+      const added = handleIncomingPart(parseSyncPartParam(partVal), false);
+      maybeShowWrongBrowserBanner(added);
+      maybeShowSafariBridgeNotice(added);
       window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
       return;
     }
@@ -2230,7 +2390,9 @@ function checkUrlForSyncData() {
 
     const data = decodeSyncPayload(payload);
     // Defer UI refresh: init() renders right after this call
-    applySyncDataWithoutRender(data);
+    const addedSync = applySyncDataWithoutRender(data);
+    maybeShowWrongBrowserBanner(addedSync);
+    maybeShowSafariBridgeNotice(addedSync);
 
     // Clean URL bar (drop query + hash)
     const cleanUrl = window.location.origin + window.location.pathname;
@@ -2279,6 +2441,7 @@ function applySyncDataWithoutRender(data) {
   if (addedCount > 0) {
     setTimeout(() => showToast(`🎉 Sincronizzati ${addedCount} tap con successo!`), 400);
   }
+  return addedCount;
 }
 
 function generateSyncUrl() {
@@ -2353,6 +2516,7 @@ function openSyncModal() {
   const staleNav = document.getElementById('qrChunkNav');
   if (staleNav) staleNav.remove();
   chunkTransfer = null;
+  updateSyncBrowserWarn();
 
   let encoded;
   try {
@@ -2409,6 +2573,150 @@ function openSyncModal() {
 
   modal.style.display = 'flex';
   showToast(`📲 Dataset grande: scansiona i ${urls.length} codici in ordine`);
+}
+
+// --- In-app QR scanner: the iPhone camera can never open the installed
+// Home-icon app directly (always Safari, an isolated silo), so the app
+// scans codes itself to receive data straight into its own storage.
+let scanStream = null;
+let scanRafId = 0;
+let scanActive = false;
+let scanLastText = '';
+let scanLastTime = 0;
+
+function isScanSupported() {
+  return typeof navigator !== 'undefined' &&
+    !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) &&
+    typeof jsQR !== 'undefined';
+}
+
+function setScanProgress(msg) {
+  const el = document.getElementById('scanProgress');
+  if (el) el.textContent = msg;
+}
+
+function openScanner() {
+  if (!isScanSupported()) {
+    showToast('⚠️ Fotocamera o lettore QR non disponibile su questo dispositivo.');
+    return;
+  }
+  const overlay = document.getElementById('scanOverlay');
+  const video = document.getElementById('scanVideo');
+  if (!overlay || !video) return;
+  overlay.style.display = 'flex';
+  setScanProgress('Inquadra un QR di SUB-LOG…');
+  scanActive = true;
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+    .then((stream) => {
+      if (!scanActive) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+      scanStream = stream;
+      video.srcObject = stream;
+      try {
+        const pr = video.play();
+        if (pr && pr.catch) pr.catch(() => {});
+      } catch (_) { /* play() rejected: frames still flow on most browsers */ }
+      scanTick();
+    })
+    .catch((err) => {
+      console.error('Camera error:', err);
+      setScanProgress('Fotocamera non accessibile: controlla i permessi del browser.');
+      showToast('⚠️ Fotocamera non accessibile.');
+    });
+}
+
+function closeScanner() {
+  scanActive = false;
+  if (scanRafId) {
+    if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(scanRafId);
+    scanRafId = 0;
+  }
+  if (scanStream) {
+    scanStream.getTracks().forEach(t => t.stop());
+    scanStream = null;
+  }
+  const video = document.getElementById('scanVideo');
+  if (video) video.srcObject = null;
+  const overlay = document.getElementById('scanOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function scanTick() {
+  if (!scanActive) return;
+  const video = document.getElementById('scanVideo');
+  const canvas = document.getElementById('scanCanvas');
+  if (video && canvas && video.readyState === video.HAVE_ENOUGH_DATA) {
+    const vw = video.videoWidth || 640;
+    const vh = video.videoHeight || 480;
+    const scale = Math.min(1, 640 / vw);
+    const w = Math.max(1, Math.floor(vw * scale));
+    const h = Math.max(1, Math.floor(vh * scale));
+    canvas.width = w;
+    canvas.height = h;
+    try {
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(video, 0, 0, w, h);
+      const res = jsQR(ctx.getImageData(0, 0, w, h).data, w, h);
+      if (res && res.data) handleScannedText(res.data);
+    } catch (e) {
+      console.error('Scan decode error:', e);
+    }
+  }
+  if (typeof requestAnimationFrame !== 'undefined') {
+    scanRafId = requestAnimationFrame(scanTick);
+  }
+}
+
+function handleScannedText(text) {
+  const now = Date.now();
+  if (text === scanLastText && now - scanLastTime < 2000) return; // debounce
+  scanLastText = text;
+  scanLastTime = now;
+
+  // Multi-QR chunk?
+  const pm = String(text).match(/[?&]syncpart=([^&#\s]+)/);
+  if (pm) {
+    let part = null;
+    try {
+      part = parseSyncPartParam(decodeURIComponent(pm[1]));
+    } catch (_) {
+      part = null;
+    }
+    if (!part) return;
+    if (hasSyncPart(part.transferId, part.idx)) {
+      setScanProgress(`Codice ${part.idx + 1}/${part.total} già acquisito — passa al successivo`);
+      return;
+    }
+    const r = ingestPart(part);
+    if (r.status === 'progress') {
+      setScanProgress(`Acquisiti ${r.received}/${r.total} — scansiona il successivo`);
+      triggerHaptic();
+    } else if (r.status === 'complete') {
+      applySyncData(r.data);
+      setScanProgress('Trasferimento completato! 🎉');
+      setTimeout(closeScanner, 1200);
+    } else {
+      setScanProgress('Codice non valido, riprova.');
+    }
+    return;
+  }
+
+  // Single sync link?
+  if (/[?#&](sync|s)=/i.test(text)) {
+    try {
+      const payload = extractSyncPayload(text);
+      if (!payload) return;
+      applySyncData(decodeSyncPayload(payload));
+      setScanProgress('Sincronizzato! 🎉');
+      setTimeout(closeScanner, 1200);
+    } catch (err) {
+      console.error('Errore QR scansionato:', err);
+      setScanProgress('Codice non valido, riprova.');
+    }
+  }
+  // else: not one of ours — ignore silently
 }
 
 function renderRemoteQrFallback(container, qrUrl) {

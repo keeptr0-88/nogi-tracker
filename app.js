@@ -124,6 +124,67 @@ function getMaxGapDays(logs) {
   return gap;
 }
 
+const HEATMAP_DAYS = 126; // 18 weeks
+
+function heatLevel(count) {
+  if (count <= 0) return 0;
+  if (count === 1) return 1;
+  if (count <= 3) return 2;
+  if (count <= 5) return 3;
+  return 4;
+}
+
+// Monday-first cells covering the trailing `days`, padded back to Monday
+// so week columns align. Pure (testable): [{date, count, inRange}].
+function buildHeatmapData(logs, days, todayUtcMs) {
+  const counts = getDayCounts(logs);
+  const now = new Date(todayUtcMs === undefined ? Date.now() : todayUtcMs);
+  const endDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const startDay = endDay - (days - 1) * 86400000;
+  const startDow = (new Date(startDay).getUTCDay() + 6) % 7; // Monday = 0
+  const gridStart = startDay - startDow * 86400000;
+  const endDow = (new Date(endDay).getUTCDay() + 6) % 7;
+  const gridEnd = endDay + ((6 - endDow + 7) % 7) * 86400000; // pad forward to Sunday
+  const cells = [];
+  for (let t = gridStart; t <= gridEnd; t += 86400000) {
+    const d = new Date(t);
+    const key = d.getUTCFullYear() + '-' + d.getUTCMonth() + '-' + d.getUTCDate();
+    cells.push({ date: d, count: counts[key] || 0, inRange: t >= startDay && t <= endDay });
+  }
+  return cells;
+}
+
+function renderCalendar() {
+  const container = document.getElementById('activityHeatmap');
+  if (!container) return;
+  container.innerHTML = '';
+  const cells = buildHeatmapData(logs, HEATMAP_DAYS);
+  const frag = document.createDocumentFragment();
+  cells.forEach(c => {
+    const el = document.createElement('div');
+    el.className = 'heatmap-cell';
+    if (!c.inRange) {
+      el.style.visibility = 'hidden';
+      frag.appendChild(el);
+      return;
+    }
+    el.dataset.level = String(heatLevel(c.count));
+    try {
+      el.title = `${c.count} tap — ${c.date.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}`;
+    } catch (_) {
+      el.title = `${c.count} tap`;
+    }
+    frag.appendChild(el);
+  });
+  container.appendChild(frag);
+
+  const summary = document.getElementById('heatmapSummary');
+  if (summary) {
+    const total = cells.reduce((s, c) => s + (c.inRange ? c.count : 0), 0);
+    summary.textContent = `${total} tap ultimi ${HEATMAP_DAYS} gg`;
+  }
+}
+
 function hasTripleThreatDay(logs) {
   const byDay = {};
   logs.forEach(l => {
@@ -521,6 +582,8 @@ let currentCategory = 'all';
 let selectedBelt = null;
 let selectedTech = null;
 let editingLogId = null;
+let feedQuery = '';
+let feedBelt = 'all';
 
 // --- Initialize App ---
 function init() {
@@ -645,6 +708,38 @@ function setupEventListeners() {
         handleLogSubmission();
       }
     });
+  }
+
+  // Date picker defaults to today and can't go in the future
+  const dateInput = document.getElementById('rollDateInput');
+  if (dateInput) {
+    dateInput.max = toLocalDateInputValue(new Date());
+  }
+
+  // Feed search + belt filter
+  const feedSearch = document.getElementById('feedSearchInput');
+  if (feedSearch) {
+    feedSearch.addEventListener('input', (e) => {
+      feedQuery = e.target.value;
+      renderFeed();
+    });
+  }
+  const feedBeltSel = document.getElementById('feedBeltFilter');
+  if (feedBeltSel) {
+    feedBeltSel.addEventListener('change', (e) => {
+      feedBelt = e.target.value;
+      renderFeed();
+    });
+  }
+
+  // CSV export + stat card
+  const csvBtn = document.getElementById('exportCsvBtn');
+  if (csvBtn) {
+    csvBtn.addEventListener('click', exportDataToCsv);
+  }
+  const cardBtn = document.getElementById('shareCardBtn');
+  if (cardBtn) {
+    cardBtn.addEventListener('click', shareStatCard);
   }
 
   const clearAllCustomBtn = document.getElementById('clearAllCustomBtn');
@@ -929,11 +1024,23 @@ function handleLogSubmission() {
   const notesInput = document.getElementById('rollNotesInput');
   const notes = notesInput ? notesInput.value.trim().slice(0, 280) : '';
 
+  const dateInput = document.getElementById('rollDateInput');
+  const parsedDate = dateInput ? parseLogDateInput(dateInput.value) : new Date();
+  if (!parsedDate) {
+    showToast('⚠️ Data non valida!');
+    return;
+  }
+  let stamp = parsedDate;
+  if (stamp > new Date()) {
+    stamp = new Date();
+    showToast('⚠️ Data futura: registro con la data di oggi.');
+  }
+
   const previousBadges = getUnlockedBadgesCount();
 
   const newLog = {
     id: generateId('log'),
-    timestamp: new Date().toISOString(),
+    timestamp: stamp.toISOString(),
     belt: selectedBelt,
     techId: selectedTech.id,
     techName: String(selectedTech.name).slice(0, 80),
@@ -941,11 +1048,13 @@ function handleLogSubmission() {
     notes: notes
   };
 
-  logs.unshift(newLog);
+  logs.push(newLog);
+  logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   saveData();
 
   // Reset inputs
   if (notesInput) notesInput.value = '';
+  if (dateInput) dateInput.value = '';
   document.querySelectorAll('.belt-btn').forEach(b => b.classList.remove('selected'));
   document.querySelectorAll('.tech-btn').forEach(b => b.classList.remove('selected'));
   selectedBelt = null;
@@ -974,6 +1083,8 @@ function renderStats() {
   // Overview metrics
   const statTotal = document.getElementById('statTotalKills');
   if (statTotal) statTotal.textContent = total;
+
+  renderCalendar();
 
   // Signature submission (count by stable techId, display stored name)
   const techCounts = {};
@@ -1085,27 +1196,44 @@ function renderFeed() {
   const container = document.getElementById('recentFeedList');
   if (!container) return;
 
-  if (logs.length === 0) {
-    container.innerHTML = '';
+  container.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+
+  const q = feedQuery.trim().toLowerCase();
+  const filtering = q !== '' || feedBelt !== 'all';
+  const visible = logs.filter(l =>
+    (feedBelt === 'all' || l.belt === feedBelt) &&
+    (!q || (l.techName || '').toLowerCase().includes(q) || (l.notes || '').toLowerCase().includes(q))
+  );
+
+  if (visible.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    const icon = document.createElement('div');
-    icon.className = 'empty-state-icon';
-    icon.textContent = '🥋';
     const p1 = document.createElement('p');
-    p1.textContent = 'Nessun tap registrato finora.';
-    const p2 = document.createElement('p');
-    p2.style.cssText = 'font-size: 0.8rem; margin-top: 6px;';
-    p2.textContent = 'Vai nella scheda "Log" e registra la tua prima sottomissione!';
-    empty.append(icon, p1, p2);
+    p1.textContent = filtering ? 'Nessun risultato per questi filtri.' : 'Nessun tap registrato finora.';
+    empty.appendChild(p1);
+    if (!filtering) {
+      const icon = document.createElement('div');
+      icon.className = 'empty-state-icon';
+      icon.textContent = '🥋';
+      const p2 = document.createElement('p');
+      p2.style.cssText = 'font-size: 0.8rem; margin-top: 6px;';
+      p2.textContent = 'Vai nella scheda "Log" e registra la tua prima sottomissione!';
+      empty.prepend(icon);
+      empty.appendChild(p2);
+    }
     container.appendChild(empty);
     return;
   }
 
-  container.innerHTML = '';
-  const fragment = document.createDocumentFragment();
+  if (filtering) {
+    const count = document.createElement('div');
+    count.style.cssText = 'font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;';
+    count.textContent = `${visible.length} di ${logs.length} mostrati`;
+    fragment.appendChild(count);
+  }
 
-  logs.forEach(log => {
+  visible.forEach(log => {
     const item = document.createElement('div');
     item.className = 'feed-item';
 
@@ -1210,6 +1338,13 @@ function openEditLog(id) {
   const notesInput = document.getElementById('editLogNotes');
   if (notesInput) notesInput.value = log.notes || '';
 
+  const dateField = document.getElementById('editLogDate');
+  if (dateField) {
+    const d = new Date(log.timestamp);
+    dateField.value = isNaN(d.getTime()) ? '' : toLocalDateInputValue(d);
+    dateField.max = toLocalDateInputValue(new Date());
+  }
+
   const modal = document.getElementById('editLogModal');
   if (modal) modal.style.display = 'flex';
 }
@@ -1237,9 +1372,25 @@ function handleSaveEditLog() {
   const belt = beltSelect && VALID_BELTS.has(beltSelect.value) ? beltSelect.value : logs[idx].belt;
   const notes = notesInput ? notesInput.value.trim().slice(0, 280) : '';
 
+  const dateField = document.getElementById('editLogDate');
+  let timestamp = logs[idx].timestamp;
+  if (dateField && dateField.value) {
+    const parsed = parseLogDateInput(dateField.value);
+    if (!parsed) {
+      showToast('⚠️ Data non valida!');
+      return;
+    }
+    // Keep the original time of day, change only the calendar date
+    const orig = new Date(logs[idx].timestamp);
+    if (!isNaN(orig.getTime())) {
+      parsed.setHours(orig.getHours(), orig.getMinutes(), orig.getSeconds(), 0);
+    }
+    timestamp = (parsed > new Date() ? new Date() : parsed).toISOString();
+  }
+
   const updated = sanitizeLog({
     id: logs[idx].id,
-    timestamp: logs[idx].timestamp,
+    timestamp,
     belt,
     techId: chosenTech.id,
     techName: chosenTech.name,
@@ -1252,6 +1403,7 @@ function handleSaveEditLog() {
   }
 
   logs[idx] = updated;
+  logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   saveData();
   closeEditModal();
   refreshAll();
@@ -1364,6 +1516,173 @@ function handleClearData() {
     refreshAll();
     showToast('🧹 Tutti i dati sono stati cancellati.');
   }
+}
+
+// --- CSV Export (semicolon-delimited for Excel IT) ---
+function csvCell(v) {
+  const s = v === null || v === undefined ? '' : String(v);
+  return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function beltNameIt(id) {
+  const b = BELTS.find(x => x.id === id);
+  return b ? b.name : id;
+}
+
+function exportDataToCsv() {
+  const header = ['data', 'cintura', 'tecnica', 'id_tecnica', 'categoria', 'note'];
+  const lines = [header.map(csvCell).join(';')];
+  logs.forEach(l => {
+    lines.push([l.timestamp, beltNameIt(l.belt), l.techName, l.techId, l.category, l.notes || '']
+      .map(csvCell).join(';'));
+  });
+  const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `sublog_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('📊 CSV scaricato!');
+}
+
+// --- Shareable Stat Card (1080x1350, Instagram-ready) ---
+function truncateCard(s, max) {
+  const str = String(s || '');
+  return str.length > max ? str.slice(0, max - 1) + '…' : str;
+}
+
+function drawStatCard() {
+  const W = 1080, H = 1350;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#0F172A');
+  bg.addColorStop(1, '#020617');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#EF4444';
+  ctx.fillRect(0, 0, W, 14);
+
+  const cx = W / 2;
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = '#F8FAFC';
+  ctx.font = '900 84px -apple-system, "Segoe UI", Roboto, sans-serif';
+  ctx.fillText('SUB·LOG', cx, 150);
+  ctx.fillStyle = '#EF4444';
+  ctx.font = '800 34px -apple-system, "Segoe UI", Roboto, sans-serif';
+  ctx.fillText('N O - G I   T R A C K E R', cx, 200);
+
+  const total = logs.length;
+  ctx.fillStyle = '#F8FAFC';
+  ctx.font = '900 260px -apple-system, "Segoe UI", Roboto, sans-serif';
+  ctx.fillText(String(total), cx, 480);
+  ctx.fillStyle = '#94A3B8';
+  ctx.font = '700 34px -apple-system, "Segoe UI", Roboto, sans-serif';
+  ctx.fillText(total === 1 ? 'KILL TOTALE' : 'KILL TOTALI', cx, 535);
+
+  // Signature move
+  const counts = {};
+  logs.forEach(l => {
+    const k = l.techId || l.techName;
+    if (!counts[k]) counts[k] = { n: 0, name: l.techName };
+    counts[k].n++;
+  });
+  let sig = { n: 0, name: '—' };
+  Object.values(counts).forEach(c => { if (c.n > sig.n) sig = c; });
+  const sigPct = total > 0 ? Math.round(sig.n / total * 100) : 0;
+  ctx.fillStyle = '#38BDF8';
+  ctx.font = '800 30px -apple-system, "Segoe UI", Roboto, sans-serif';
+  ctx.fillText('MOSSA MIGLIORE', cx, 620);
+  ctx.fillStyle = '#F8FAFC';
+  ctx.font = '800 52px -apple-system, "Segoe UI", Roboto, sans-serif';
+  ctx.fillText(truncateCard(sig.name, 26), cx, 685);
+  ctx.fillStyle = '#94A3B8';
+  ctx.font = '600 34px -apple-system, "Segoe UI", Roboto, sans-serif';
+  ctx.fillText(`${sig.n} tap • ${sigPct}%`, cx, 735);
+
+  // Belt breakdown
+  const beltColors = { white: '#F1F5F9', blue: '#3B82F6', purple: '#A855F7', brown: '#D97706', black: '#64748B' };
+  const beltCounts = { white: 0, blue: 0, purple: 0, brown: 0, black: 0 };
+  logs.forEach(l => { if (beltCounts[l.belt] !== undefined) beltCounts[l.belt]++; });
+  const maxBelt = Math.max(1, ...Object.values(beltCounts));
+  let y = 810;
+  BELTS.forEach(b => {
+    const c = beltCounts[b.id] || 0;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = '700 30px -apple-system, "Segoe UI", Roboto, sans-serif';
+    ctx.fillText(b.name, 120, y + 30);
+    ctx.fillStyle = '#1E293B';
+    ctx.fillRect(330, y, 520, 34);
+    if (c > 0) {
+      ctx.fillStyle = beltColors[b.id];
+      ctx.fillRect(330, y, Math.max(34, Math.round(520 * c / maxBelt)), 34);
+    }
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#F8FAFC';
+    ctx.font = '800 32px -apple-system, "Segoe UI", Roboto, sans-serif';
+    ctx.fillText(String(c), 960, y + 31);
+    y += 62;
+  });
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#64748B';
+  ctx.font = '600 28px -apple-system, "Segoe UI", Roboto, sans-serif';
+  try {
+    ctx.fillText(`Aggiornato al ${new Date().toLocaleDateString('it-IT')}`, cx, H - 60);
+  } catch (_) {
+    ctx.fillText('SUB-LOG', cx, H - 60);
+  }
+  return canvas;
+}
+
+function shareStatCard() {
+  if (logs.length === 0) {
+    showToast('⚠️ Niente da condividere: registra prima un tap!');
+    return;
+  }
+  let canvas;
+  try {
+    canvas = drawStatCard();
+  } catch (e) {
+    console.error('Stat card error:', e);
+    showToast('⚠️ Errore nella generazione della card!');
+    return;
+  }
+  canvas.toBlob(async (blob) => {
+    if (!blob) {
+      showToast('⚠️ Errore nella generazione della card!');
+      return;
+    }
+    const file = new File([blob], 'sublog-stat-card.png', { type: 'image/png' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'SUB-LOG Stat Card' });
+        showToast('📊 Card condivisa!');
+        return;
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      console.error('Card share failed, falling back to download:', err);
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'sublog-stat-card.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('📊 Card scaricata!');
+  }, 'image/png');
 }
 
 // --- QR / Device Synchronization Engine ---
@@ -1951,6 +2270,25 @@ function formatShortDate(isoString) {
   } catch (e) {
     return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   }
+}
+
+// <input type="date"> value (YYYY-MM-DD) -> local noon Date.
+// Returns `new Date()` when empty, null when malformed.
+function parseLogDateInput(value) {
+  if (!value) return new Date();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3], 12, 0, 0);
+  // Reject overflowing components (e.g. month 13, Feb 30)
+  if (isNaN(d.getTime()) || d.getFullYear() !== +m[1] || d.getMonth() !== +m[2] - 1 || d.getDate() !== +m[3]) {
+    return null;
+  }
+  return d;
+}
+
+function toLocalDateInputValue(date) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
 }
 
 function escapeHtml(text) {

@@ -8,8 +8,8 @@ PWA per registrare le sottomissioni messe a segno in allenamento (No-Gi / BJJ), 
 - **Stats** — totale, signature move, distribuzione per cintura e per categoria.
 - **Trofei** — 31 obiettivi (volumi, cacciatori di cinture, specialisti di tecnica, streak, varietà).
 - **Storico** — cronologia modificabile (tecnica, cintura, note) o cancellabile.
-- **Sync PC ⇄ telefono** — QR code o link generato in locale, senza server. I payload troppo grandi per un QR passano da link o backup JSON.
-- **Backup** — export/import JSON.
+- **Sync PC ⇄ telefono** — QR code generato in locale, senza server. Dataset piccoli: un QR solo. Dataset grandi: QR multipli in sequenza (`?syncpart=`, ~1100 caratteri l'uno, accumulati sul ricevente fino al completamento). Alternative: copia-link o backup JSON.
+- **Backup** — export JSON, import JSON, o condivisione diretta via Web Share (AirDrop) con fallback al download.
 
 ## Uso in locale
 
@@ -47,5 +47,5 @@ Qualsiasi hosting statico va bene. Su GitHub Pages: Settings → Pages → Branc
 ## Note tecniche
 
 - Storage: due chiavi LocalStorage (`sublog_nogi_logs_v1`, `sublog_custom_techs_v1`). I record non validi in import/sync vengono scartati, non bloccano.
-- Il sync codifica il dataset in un URL (base64url, formato compatto v2; i link v1 restano leggibili). Il QR mostra al massimo ~1500 caratteri: oltre, viene offerto un QR con i tap più recenti, oppure copia-link / backup JSON per il dataset completo.
+- Il sync codifica il dataset in un URL (base64url, formato compatto v2; i link v1 restano leggibili). Il singolo QR mostra al massimo ~1500 caratteri: oltre, il sync passa a QR multipli in sequenza; i frammenti in attesa vivono in LocalStorage (`sublog_parts_*`, scadenza 7 giorni).
 - Cache PWA versionata (`sublog-nogi-vN` in `sw.js`): ad ogni cambio di asset cached, alzare la versione.

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sublog-nogi-v8';
+const CACHE_NAME = 'sublog-nogi-v9';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

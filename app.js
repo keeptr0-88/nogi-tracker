@@ -75,6 +75,68 @@ function getMaxDayStreak(logs) {
   return best;
 }
 
+// ISO week key (UTC) for long-term consistency badges
+function getIsoWeekKey(d) {
+  const dt = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const day = (dt.getUTCDay() + 6) % 7; // Monday = 0
+  dt.setUTCDate(dt.getUTCDate() - day + 3); // Thursday of this week
+  const firstThu = new Date(Date.UTC(dt.getUTCFullYear(), 0, 4));
+  const fday = (firstThu.getUTCDay() + 6) % 7;
+  firstThu.setUTCDate(firstThu.getUTCDate() - fday + 3);
+  const week = 1 + Math.round((dt - firstThu) / (7 * 86400000));
+  return dt.getUTCFullYear() + '-W' + week;
+}
+
+function getDistinctWeeks(logs) {
+  const weeks = new Set();
+  logs.forEach(l => {
+    const d = new Date(l.timestamp);
+    if (!isNaN(d.getTime())) weeks.add(getIsoWeekKey(d));
+  });
+  return weeks;
+}
+
+function getDayCounts(logs) {
+  const counts = {};
+  logs.forEach(l => {
+    const d = new Date(l.timestamp);
+    if (isNaN(d.getTime())) return;
+    const k = d.getUTCFullYear() + '-' + d.getUTCMonth() + '-' + d.getUTCDate();
+    counts[k] = (counts[k] || 0) + 1;
+  });
+  return counts;
+}
+
+function getMaxTapsSingleDay(logs) {
+  const counts = Object.values(getDayCounts(logs));
+  return counts.length ? Math.max(...counts) : 0;
+}
+
+function getMaxGapDays(logs) {
+  const days = [...getDistinctDayKeys(logs)].map(k => {
+    const [y, m, dd] = k.split('-').map(Number);
+    return Date.UTC(y, m, dd) / 86400000;
+  }).sort((a, b) => a - b);
+  let gap = 0;
+  for (let i = 1; i < days.length; i++) {
+    gap = Math.max(gap, days[i] - days[i - 1] - 1);
+  }
+  return gap;
+}
+
+function hasTripleThreatDay(logs) {
+  const byDay = {};
+  logs.forEach(l => {
+    const d = new Date(l.timestamp);
+    if (isNaN(d.getTime())) return;
+    const k = d.getUTCFullYear() + '-' + d.getUTCMonth() + '-' + d.getUTCDate();
+    if (!byDay[k]) byDay[k] = new Set();
+    byDay[k].add(l.category);
+  });
+  return Object.values(byDay).some(set =>
+    set.has('chokes') && set.has('leglocks') && set.has('armlocks'));
+}
+
 const BADGES_CONFIG = [
   {
     id: 'first_kill',
@@ -301,6 +363,107 @@ const BADGES_CONFIG = [
     title: 'Innovatore',
     desc: 'Crea la tua prima mossa personalizzata.',
     check: () => customTechs.length >= 1
+  },
+  // --- Volumi estremi ---
+  {
+    id: 'volume_300',
+    icon: '🏔️',
+    title: 'Predatore Apex',
+    desc: '300 sottomissioni totali registrate.',
+    check: (logs) => logs.length >= 300
+  },
+  {
+    id: 'volume_500',
+    icon: '🗿',
+    title: 'Immortale',
+    desc: '500 sottomissioni totali registrate. Il tatami ti appartiene.',
+    check: (logs) => logs.length >= 500
+  },
+  // --- Specialisti extra ---
+  {
+    id: 'leg_collector',
+    icon: '🦿',
+    title: 'Collezionista di Gambe',
+    desc: '15 leg lock registrati.',
+    check: (logs) => logs.filter(l => l.category === 'leglocks').length >= 15
+  },
+  {
+    id: 'americana_express',
+    icon: '⛓️',
+    title: 'Americana Express',
+    desc: '5 Americane messe a segno.',
+    check: (logs) => logs.filter(l => l.techId === 'americana').length >= 5
+  },
+  {
+    id: 'ezekiel_enforcer',
+    icon: '🧣',
+    title: 'Ezekiel Enforcer',
+    desc: '3 Ezekiel (classico o a un braccio) messi a segno.',
+    check: (logs) => logs.filter(l => ['ezekiel', 'ezekiel_one_arm'].includes(l.techId)).length >= 3
+  },
+  {
+    id: 'rare_breed',
+    icon: '🦄',
+    title: 'Razza Rara',
+    desc: 'Finalizza con una mossa esotica: Twister, Buggy, Von Flue, Wristlock o Calf Slicer.',
+    check: (logs) => logs.some(l => ['twister', 'buggy', 'von_flue', 'wristlock', 'calf_slicer'].includes(l.techId))
+  },
+  // --- Imprese di un giorno e costanza ---
+  {
+    id: 'triple_threat',
+    icon: '🔱',
+    title: 'Tripla Minaccia',
+    desc: 'Strangolamento, leg lock e leva nello stesso giorno.',
+    check: (logs) => hasTripleThreatDay(logs)
+  },
+  {
+    id: 'marathon',
+    icon: '🏃',
+    title: 'Maratona',
+    desc: '5 sottomissioni registrate in un solo giorno.',
+    check: (logs) => getMaxTapsSingleDay(logs) >= 5
+  },
+  {
+    id: 'comeback',
+    icon: '🔙',
+    title: 'Comeback',
+    desc: 'Torna a registrare dopo 30+ giorni di pausa.',
+    check: (logs) => getMaxGapDays(logs) >= 30
+  },
+  {
+    id: 'grinder',
+    icon: '⚙️',
+    title: 'Grinder',
+    desc: 'Registra tap in 8 settimane diverse.',
+    check: (logs) => getDistinctWeeks(logs).size >= 8
+  },
+  // --- Completezza ---
+  {
+    id: 'completionist',
+    icon: '🎖️',
+    title: 'Completista',
+    desc: 'Finalizza con tutte le 23 tecniche di base.',
+    check: (logs) => {
+      const have = new Set(logs.map(l => l.techId));
+      return TECHNIQUES.every(t => have.has(t.id));
+    }
+  },
+  {
+    id: 'mad_scientist',
+    icon: '👨‍🔬',
+    title: 'Scienziato Pazzo',
+    desc: 'Vai a segno con una mossa personalizzata.',
+    check: (logs) => logs.some(l => typeof l.techId === 'string' && l.techId.startsWith('custom_'))
+  },
+  {
+    id: 'full_house',
+    icon: '🃏',
+    title: 'Full House',
+    desc: 'Almeno una finalizzazione per ogni categoria, custom incluse.',
+    check: (logs) => {
+      const cats = new Set(logs.map(l => l.category));
+      return cats.has('chokes') && cats.has('leglocks') && cats.has('armlocks') && cats.has('custom');
+    }
   }
 ];
 
@@ -493,6 +656,11 @@ function setupEventListeners() {
   const exportBtn = document.getElementById('exportDataBtn');
   if (exportBtn) {
     exportBtn.addEventListener('click', exportDataToFile);
+  }
+
+  const shareBackupBtn = document.getElementById('shareBackupBtn');
+  if (shareBackupBtn) {
+    shareBackupBtn.addEventListener('click', shareBackupFile);
   }
 
   const importFileInput = document.getElementById('importFileInput');
@@ -1096,6 +1264,33 @@ function updateTotalHeader() {
 }
 
 // --- Backup, Export & Import ---
+function buildBackupFile() {
+  const data = {
+    appName: 'SUB-LOG No-Gi Grappling Tracker',
+    exportDate: new Date().toISOString(),
+    logs: logs,
+    customTechniques: customTechs
+  };
+  const name = `sublog_backup_${new Date().toISOString().slice(0, 10)}.json`;
+  return new File([JSON.stringify(data, null, 2)], name, { type: 'application/json' });
+}
+
+async function shareBackupFile() {
+  const file = buildBackupFile();
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'SUB-LOG Backup' });
+      showToast('📤 Backup condiviso!');
+      return;
+    }
+  } catch (err) {
+    // User dismissed the share sheet: not an error
+    if (err && err.name === 'AbortError') return;
+    console.error('Share failed, falling back to download:', err);
+  }
+  exportDataToFile();
+}
+
 function exportDataToFile() {
   const data = {
     appName: 'SUB-LOG No-Gi Grappling Tracker',
@@ -1324,8 +1519,110 @@ function applySyncData(data) {
   showToast(`🎉 Sincronizzati ${addedCount} tap con successo!${droppedCount > 0 ? ` (${droppedCount} ignorati)` : ''}${addedTechs > 0 ? ` +${addedTechs} mosse` : ''}`);
 }
 
+const PARTS_PREFIX = 'sublog_parts_';
+const PARTS_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const PARTS_MAX_CHUNKS = 200;
+
+function pruneStaleParts() {
+  try {
+    const now = Date.now();
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(PARTS_PREFIX)) {
+        try {
+          const entry = JSON.parse(localStorage.getItem(key));
+          if (!entry || typeof entry.updatedAt !== 'number' || now - entry.updatedAt > PARTS_MAX_AGE_MS) {
+            localStorage.removeItem(key);
+          }
+        } catch (_) {
+          localStorage.removeItem(key);
+        }
+      }
+    }
+  } catch (_) { /* storage unavailable */ }
+}
+
+// Stores one chunk of a multi-QR transfer. Returns {received, total} or
+// null on invalid input. When all chunks arrive, assembles + applies them.
+function storeSyncPart(transferId, idx, total, chunk) {
+  if (!/^[A-Za-z0-9]{4,16}$/.test(transferId)) return null;
+  if (!Number.isInteger(idx) || !Number.isInteger(total)) return null;
+  if (idx < 0 || idx >= total || total < 1 || total > PARTS_MAX_CHUNKS) return null;
+  if (typeof chunk !== 'string' || chunk.length === 0 || chunk.length > 2000) return null;
+  if (!/^[A-Za-z0-9\-_]+$/.test(chunk)) return null;
+
+  const key = PARTS_PREFIX + transferId;
+  let entry;
+  try {
+    entry = JSON.parse(localStorage.getItem(key)) || { n: total, parts: {} };
+  } catch (_) {
+    entry = { n: total, parts: {} };
+  }
+  if (entry.n !== total) {
+    // Conflicting transfer id (reused): restart collection
+    entry = { n: total, parts: {} };
+  }
+  entry.parts[idx] = chunk;
+  entry.updatedAt = Date.now();
+  try {
+    localStorage.setItem(key, JSON.stringify(entry));
+  } catch (_) { return null; }
+
+  const received = Object.keys(entry.parts).length;
+  if (received >= total) {
+    let assembled = '';
+    for (let i = 0; i < total; i++) assembled += entry.parts[i] || '';
+    localStorage.removeItem(key);
+    return { received, total, assembled };
+  }
+  return { received, total, assembled: null };
+}
+
+function parseSyncPartParam(val) {
+  if (typeof val !== 'string') return null;
+  const m = val.trim().match(/^([A-Za-z0-9]{4,16})\.(\d{1,4})\.(\d{1,4})\.([A-Za-z0-9\-_]+)$/);
+  if (!m) return null;
+  return { transferId: m[1], idx: parseInt(m[2], 10), total: parseInt(m[3], 10), chunk: m[4] };
+}
+
+function handleIncomingPart(part, useRender) {
+  if (!part) {
+    showToast('⚠️ Codice di trasferimento non valido!');
+    return;
+  }
+  const res = storeSyncPart(part.transferId, part.idx, part.total, part.chunk);
+  if (!res) {
+    showToast('⚠️ Frammento non valido!');
+    return;
+  }
+  if (res.assembled === null) {
+    showToast(`📥 Frammento ${res.received}/${res.total} ricevuto — scansiona il successivo`);
+    triggerHaptic();
+    return;
+  }
+  try {
+    const data = decodeSyncPayload(res.assembled);
+    if (useRender) applySyncData(data);
+    else applySyncDataWithoutRender(data);
+  } catch (err) {
+    console.error('Errore assemblaggio trasferimento:', err);
+    showToast('⚠️ Trasferimento danneggiato, riprova da capo');
+  }
+}
+
 function checkUrlForSyncData() {
   try {
+    pruneStaleParts();
+
+    // Multi-QR chunked transfer (?syncpart=<id>.<i>.<n>.<chunk>)
+    const partParams = new URLSearchParams(window.location.search);
+    const partVal = partParams.get('syncpart');
+    if (partVal) {
+      handleIncomingPart(parseSyncPartParam(partVal), false);
+      window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+      return;
+    }
+
     const payload = extractSyncPayload(window.location.href);
     // Only treat as sync when the current URL actually carries a sync param
     const hasSyncParam = /[?#&](sync|s)=/i.test(window.location.href);
@@ -1415,27 +1712,31 @@ function renderLocalQrCode(container, text) {
   return false;
 }
 
-// How many of the most recent logs fit in a scannable QR code?
-// Returns 0 when not even one fits (then only link/backup remain).
-function countQrFittingLogs() {
-  if (logs.length === 0) return 0;
-  const full = encodeSyncPayload({ logs, customTechs });
-  if (full.length <= QR_MAX_CHARS) return logs.length;
-  const perLog = full.length / logs.length;
-  let n = Math.max(1, Math.min(logs.length - 1, Math.floor(QR_MAX_CHARS / perLog)));
-  while (n > 0) {
-    const size = encodeSyncPayload({ logs: logs.slice(0, n), customTechs }).length;
-    if (size <= QR_MAX_CHARS) return n;
-    n--;
+// Characters of encoded payload per QR chunk. Keeps each code well within
+// what phone cameras scan reliably (see QR_MAX_CHARS).
+const QR_CHUNK_CHARS = 1100;
+let chunkTransfer = null;
+
+function buildChunkUrls(encoded) {
+  const transferId = Math.random().toString(36).slice(2, 10);
+  const chunks = [];
+  for (let i = 0; i < encoded.length; i += QR_CHUNK_CHARS) {
+    chunks.push(encoded.slice(i, i + QR_CHUNK_CHARS));
   }
-  return 0;
+  const base = window.location.origin + window.location.pathname;
+  return chunks.map((c, i) => `${base}?syncpart=${transferId}.${i}.${chunks.length}.${c}`);
 }
 
-function syncUrlForFirstN(n) {
-  const payload = { logs: logs.slice(0, n), customTechs };
-  const encoded = encodeSyncPayload(payload);
-  const base = window.location.origin + window.location.pathname;
-  return `${base}?sync=${encoded}`;
+function renderChunkQr(index) {
+  const modal = document.getElementById('syncModal');
+  const container = document.getElementById('qrcodeContainer');
+  const counter = document.getElementById('qrChunkCounter');
+  if (!modal || !container || !chunkTransfer) return;
+  chunkTransfer.idx = Math.max(0, Math.min(chunkTransfer.urls.length - 1, index));
+  renderLocalQrCode(container, chunkTransfer.urls[chunkTransfer.idx]);
+  if (counter) {
+    counter.textContent = `Codice ${chunkTransfer.idx + 1} di ${chunkTransfer.urls.length} — inquadrali in ordine`;
+  }
 }
 
 function openSyncModal() {
@@ -1449,56 +1750,79 @@ function openSyncModal() {
   }
 
   container.innerHTML = '';
-  const staleNote = document.getElementById('qrSubsetNote');
-  if (staleNote) staleNote.remove();
-  let syncUrl;
+  const staleNav = document.getElementById('qrChunkNav');
+  if (staleNav) staleNav.remove();
+  chunkTransfer = null;
+
+  let encoded;
   try {
-    syncUrl = generateSyncUrl();
+    encoded = encodeSyncPayload({ logs, customTechs });
   } catch (e) {
     console.error('Sync encode error:', e);
     showToast('⚠️ Errore nella generazione del link!');
     return;
   }
-  modal.dataset.syncUrl = syncUrl;
+  const base = window.location.origin + window.location.pathname;
+  modal.dataset.syncUrl = `${base}?sync=${encoded}`;
 
-  let qrUrl = syncUrl;
-  let qrNote = '';
-  if (syncUrl.length > QR_MAX_CHARS) {
-    const fitting = countQrFittingLogs();
-    if (fitting <= 0) {
-      container.innerHTML = '<p style="color:#000; font-size:0.8rem; padding:10px; max-width:240px;">Troppi dati per un QR code. Usa "Copia Link" o il Backup JSON qui sotto.</p>';
-      modal.style.display = 'flex';
-      showToast('⚠️ Troppi tap per il QR: usa Copia Link o Backup JSON');
-      return;
-    }
-    qrUrl = syncUrlForFirstN(fitting);
-    qrNote = `QR con gli ultimi ${fitting} tap su ${logs.length} — per tutti usa "Copia Link".`;
+  if (encoded.length <= QR_MAX_CHARS) {
+    // Small enough for one scannable code
+    const ok = renderLocalQrCode(container, modal.dataset.syncUrl);
+    if (!ok) renderRemoteQrFallback(container, modal.dataset.syncUrl);
+    modal.style.display = 'flex';
+    return;
   }
 
-  // Privacy-first: generate QR locally (offline). Remote API only as fallback.
-  const ok = renderLocalQrCode(container, qrUrl);
-  if (!ok) {
-    const qrImg = document.createElement('img');
-    qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=${QR_RENDER_PX}x${QR_RENDER_PX}&margin=8&data=${encodeURIComponent(qrUrl)}`;
-    qrImg.alt = 'QR Code Sincronizzazione';
-    qrImg.style.width = QR_RENDER_PX + 'px';
-    qrImg.style.height = QR_RENDER_PX + 'px';
-    qrImg.style.display = 'block';
-    qrImg.style.borderRadius = '12px';
-    qrImg.onerror = () => {
-      container.innerHTML = '<p style="color:#000; font-size:0.8rem; padding:10px;">Usa il pulsante "Copia Link" qui sotto</p>';
-    };
-    container.appendChild(qrImg);
-  }
-  if (qrNote) {
-    const note = document.createElement('p');
-    note.id = 'qrSubsetNote';
-    note.style.cssText = 'color:#000; font-size:0.75rem; padding:8px 4px 0; max-width:250px; font-weight:600;';
-    note.textContent = qrNote;
-    container.parentElement.insertBefore(note, container.nextSibling);
-  }
+  // Large dataset: paginated multi-QR transfer. The receiver scans every
+  // code in order; parts accumulate until the transfer completes.
+  const urls = buildChunkUrls(encoded);
+  chunkTransfer = { urls, idx: 0 };
+  renderChunkQr(0);
+
+  const nav = document.createElement('div');
+  nav.id = 'qrChunkNav';
+  nav.style.cssText = 'display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 10px;';
+
+  const prev = document.createElement('button');
+  prev.type = 'button';
+  prev.className = 'cat-chip';
+  prev.style.cssText = 'cursor: pointer; font-weight: 800;';
+  prev.textContent = '◀';
+  prev.setAttribute('aria-label', 'Codice precedente');
+  prev.addEventListener('click', () => renderChunkQr(chunkTransfer.idx - 1));
+
+  const counter = document.createElement('div');
+  counter.id = 'qrChunkCounter';
+  counter.style.cssText = 'color: #000; font-size: 0.75rem; font-weight: 700;';
+
+  const next = document.createElement('button');
+  next.type = 'button';
+  next.className = 'cat-chip';
+  next.style.cssText = 'cursor: pointer; font-weight: 800;';
+  next.textContent = '▶';
+  next.setAttribute('aria-label', 'Codice successivo');
+  next.addEventListener('click', () => renderChunkQr(chunkTransfer.idx + 1));
+
+  nav.append(prev, counter, next);
+  container.parentElement.insertBefore(nav, container.nextSibling);
+  counter.textContent = `Codice 1 di ${urls.length} — inquadrali in ordine`;
 
   modal.style.display = 'flex';
+  showToast(`📲 Dataset grande: scansiona i ${urls.length} codici in ordine`);
+}
+
+function renderRemoteQrFallback(container, qrUrl) {
+  const qrImg = document.createElement('img');
+  qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=${QR_RENDER_PX}x${QR_RENDER_PX}&margin=8&data=${encodeURIComponent(qrUrl)}`;
+  qrImg.alt = 'QR Code Sincronizzazione';
+  qrImg.style.width = QR_RENDER_PX + 'px';
+  qrImg.style.height = QR_RENDER_PX + 'px';
+  qrImg.style.display = 'block';
+  qrImg.style.borderRadius = '12px';
+  qrImg.onerror = () => {
+    container.innerHTML = '<p style="color:#000; font-size:0.8rem; padding:10px;">Usa il pulsante "Copia Link" qui sotto</p>';
+  };
+  container.appendChild(qrImg);
 }
 
 async function copyTextToClipboard(text) {
@@ -1562,6 +1886,13 @@ function handleManualSyncInput() {
   }
 
   try {
+    // Multi-QR chunk (?syncpart=...) pasted manually
+    const partMatch = val.match(/[?&]syncpart=([^&#\s]+)/);
+    if (partMatch) {
+      handleIncomingPart(parseSyncPartParam(decodeURIComponent(partMatch[1])), true);
+      input.value = '';
+      return;
+    }
     const payload = extractSyncPayload(val);
     if (!payload) {
       showToast('⚠️ Codice o link non valido!');

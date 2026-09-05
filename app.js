@@ -665,7 +665,7 @@ const VALID_CATEGORIES = new Set(['chokes', 'leglocks', 'armlocks', 'custom']);
 // --- State Management ---
 const STORAGE_KEY = 'sublog_nogi_logs_v1';
 const CUSTOM_TECH_KEY = 'sublog_custom_techs_v1';
-const MAX_SYNC_URL_LENGTH = 6000;
+const MAX_SYNC_URL_LENGTH = 30000;
 // iPhone cameras reliably scan on-screen QR codes up to roughly this many
 // characters (byte mode, EC level M). Anything bigger renders as an
 // ultra-dense, unscannable code — so we QR a recent subset instead.
@@ -1162,7 +1162,7 @@ function handleLogSubmission() {
     return;
   }
   let stamp = parsedDate;
-  if (stamp > new Date()) {
+  if (isFutureCalendarDay(stamp)) {
     stamp = new Date();
     showToast('⚠️ Data futura: registro con la data di oggi.');
   }
@@ -1516,7 +1516,7 @@ function handleSaveEditLog() {
     if (!isNaN(orig.getTime())) {
       parsed.setHours(orig.getHours(), orig.getMinutes(), orig.getSeconds(), 0);
     }
-    timestamp = (parsed > new Date() ? new Date() : parsed).toISOString();
+    timestamp = (isFutureCalendarDay(parsed) ? new Date() : parsed).toISOString();
   }
 
   const updated = sanitizeLog({
@@ -1544,6 +1544,15 @@ function handleSaveEditLog() {
 function updateTotalHeader() {
   const countEl = document.getElementById('headerTotalKills');
   if (countEl) countEl.textContent = logs.length;
+}
+
+function resetFeedFilters() {
+  feedQuery = '';
+  feedBelt = 'all';
+  const search = document.getElementById('feedSearchInput');
+  if (search) search.value = '';
+  const beltSel = document.getElementById('feedBeltFilter');
+  if (beltSel) beltSel.value = 'all';
 }
 
 // --- Backup, Export & Import ---
@@ -1620,6 +1629,7 @@ function importDataFromFile(e) {
       logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       saveData();
       selectedTech = null;
+      resetFeedFilters();
       refreshAll();
       showToast(`✅ Ripristinati ${logs.length} tap con successo!${droppedLogs > 0 ? ` (${droppedLogs} record non validi ignorati)` : ''}`);
     } catch (err) {
@@ -1643,6 +1653,7 @@ function handleClearData() {
     customTechs = [];
     selectedBelt = null;
     selectedTech = null;
+    resetFeedFilters();
     saveData();
     refreshAll();
     showToast('🧹 Tutti i dati sono stati cancellati.');
@@ -1651,7 +1662,9 @@ function handleClearData() {
 
 // --- CSV Export (semicolon-delimited for Excel IT) ---
 function csvCell(v) {
-  const s = v === null || v === undefined ? '' : String(v);
+  let s = v === null || v === undefined ? '' : String(v);
+  // Prevent spreadsheet formula injection from user notes/names
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
   return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
@@ -1926,6 +1939,8 @@ function applySyncData(data) {
     return;
   }
 
+  const previousBadges = getUnlockedBadgesCount();
+
   const rawLogs = Array.isArray(data.logs) ? data.logs : data;
   let addedCount = 0;
   let droppedCount = 0;
@@ -1967,6 +1982,12 @@ function applySyncData(data) {
   triggerHaptic();
 
   showToast(`🎉 Sincronizzati ${addedCount} tap con successo!${droppedCount > 0 ? ` (${droppedCount} ignorati)` : ''}${addedTechs > 0 ? ` +${addedTechs} mosse` : ''}`);
+  if (addedCount > 0 && getUnlockedBadgesCount() > previousBadges) {
+    setTimeout(() => {
+      showToast('🏆 NUOVO TROFEO SBLOCCATO! Controlla la bacheca!');
+      triggerHaptic();
+    }, 1200);
+  }
 }
 
 const PARTS_PREFIX = 'sublog_parts_';
@@ -2215,7 +2236,7 @@ function openSyncModal() {
   const base = window.location.origin + window.location.pathname;
   modal.dataset.syncUrl = `${base}?sync=${encoded}`;
 
-  if (encoded.length <= QR_MAX_CHARS) {
+  if (modal.dataset.syncUrl.length <= QR_MAX_CHARS) {
     // Small enough for one scannable code
     const ok = renderLocalQrCode(container, modal.dataset.syncUrl);
     if (!ok) renderRemoteQrFallback(container, modal.dataset.syncUrl);
@@ -2311,7 +2332,7 @@ function handleCopySyncLink() {
     return;
   }
   if (syncUrl.length > MAX_SYNC_URL_LENGTH) {
-    showToast('⚠️ Link troppo lungo: usa il Backup JSON per trasferire i dati.');
+    showToast('⚠️ Link molto lungo: se l\u2019invio fallisce, usa il Backup JSON.');
   }
   copyTextToClipboard(syncUrl).then(() => {
     const feedback = document.getElementById('syncLinkCopyFeedback');
@@ -2405,6 +2426,15 @@ function formatShortDate(isoString) {
 
 // <input type="date"> value (YYYY-MM-DD) -> local noon Date.
 // Returns `new Date()` when empty, null when malformed.
+// Calendar-day comparison (ignores time of day): avoids flagging
+// "today at noon" as future when logging in the morning.
+function isFutureCalendarDay(d) {
+  const now = new Date();
+  const a = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const b = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return a > b;
+}
+
 function parseLogDateInput(value) {
   if (!value) return new Date();
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -2420,12 +2450,6 @@ function parseLogDateInput(value) {
 function toLocalDateInputValue(date) {
   const p = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text == null ? '' : String(text);
-  return div.innerHTML;
 }
 
 // --- PWA Service Worker Registration ---

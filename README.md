@@ -6,7 +6,7 @@ PWA per registrare le sottomissioni messe a segno in allenamento (No-Gi / BJJ), 
 
 - **Log rapido** — cintura dell'avversario, tecnica, note e data (per registrare anche i roll dei giorni scorsi). Le tecniche custom si aggiungono dall'interfaccia.
 - **Stats** — totale, signature move, distribuzione per cinture e categorie, mappa di attività a 18 settimane, stat card condivisibile (PNG 1080x1350).
-- **Trofei** — 44 obiettivi (volumi, cacciatori di cinture, specialisti di tecnica, streak, varietà).
+- **Trofei** — 56 obiettivi (volumi, cacciatori di cinture, specialisti di tecnica, streak, varietà).
 - **Storico** — cronologia con ricerca e filtro per cintura; ogni voce è modificabile o cancellabile.
 - **Sync PC ⇄ telefono** — QR code generato in locale, senza server. Dataset piccoli: un QR solo. Dataset grandi: QR multipli in sequenza (`?syncpart=`, ~1100 caratteri l'uno, accumulati sul ricevente fino al completamento). Alternative: copia-link o backup JSON.
 - **Backup** — export JSON o CSV (compatibile Excel), import JSON, o condivisione diretta via Web Share (AirDrop) con fallback al download.

@@ -31,8 +31,13 @@
         <span>SUB·LOG</span>
         <span class="brand-badge">NO-GI</span>
       </div>
-      <div class="total-pill">
-        KILLS: <span id="headerTotalKills">0</span>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <button type="button" id="openSyncModalBtn" class="total-pill" style="cursor: pointer; background: rgba(56, 189, 248, 0.15); border-color: #38BDF8; color: #38BDF8; font-weight: 800;">
+          📲 Sync iPhone
+        </button>
+        <div class="total-pill">
+          KILLS: <span id="headerTotalKills">0</span>
+        </div>
       </div>
     </header>
 
@@ -228,9 +233,22 @@
 
     <!-- ================= VIEW 5: INFO & BACKUP ================= -->
     <main id="view-info" class="view-content">
+      <!-- Sync Section -->
+      <div class="card" style="border: 1px solid #38BDF8; background: rgba(56, 189, 248, 0.04);">
+        <div class="card-title" style="color: #38BDF8;">
+          <span>📲 Sincronizza Dispositivi (PC ⇄ iPhone)</span>
+        </div>
+        <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.4;">
+          Hai registrato tap su questo computer e vuoi vederli sul tuo iPhone? Clicca qui sotto e inquadra il codice con la fotocamera del telefono per trasferirli all'istante.
+        </p>
+        <button type="button" id="openSyncModalCardBtn" class="btn-primary" style="background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%); padding: 13px; font-size: 0.9rem; box-shadow: 0 4px 16px rgba(2, 132, 199, 0.35);">
+          Mostra QR Code di Sincronizzazione
+        </button>
+      </div>
+
       <!-- Backup Section -->
       <div class="card">
-        <div class="card-title">Backup & Salvataggio</div>
+        <div class="card-title">Backup Manuale</div>
         <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 14px; line-height: 1.4;">
           I tuoi dati sono salvati nella memoria del tuo iPhone. Puoi esportarli in un file per sicurezza o trasferirli su un altro dispositivo.
         </p>
@@ -323,7 +341,29 @@
     </nav>
   </div>
 
-  <!-- App Script -->
+  <!-- Sync Modal -->
+  <div id="syncModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 2000; align-items: center; justify-content: center; padding: 20px;">
+    <div style="background: #0F172A; border: 1px solid #334155; border-radius: 24px; max-width: 360px; width: 100%; padding: 24px; text-align: center; position: relative; box-shadow: 0 20px 50px rgba(0,0,0,0.85);">
+      <button type="button" id="closeSyncModalBtn" style="position: absolute; top: 12px; right: 16px; background: none; border: none; color: #94A3B8; font-size: 1.8rem; cursor: pointer; line-height: 1;">&times;</button>
+      
+      <div style="font-size: 1.15rem; font-weight: 800; color: #FFF; margin-bottom: 6px;">Sincronizza con iPhone</div>
+      <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.4;">
+        Apri la <strong>Fotocamera</strong> del tuo iPhone e inquadra questo codice per trasferire subito tutti i tap salvati:
+      </p>
+      
+      <div id="qrcodeContainer" style="display: flex; justify-content: center; margin-bottom: 16px; padding: 12px; background: #FFF; border-radius: 16px; width: fit-content; margin-left: auto; margin-right: auto; box-shadow: 0 4px 15px rgba(255,255,255,0.1);"></div>
+
+      <button type="button" id="copySyncLinkBtn" class="cat-chip" style="width: 100%; background: #1E293B; color: #38BDF8; border-color: #38BDF8; padding: 12px; font-weight: 800; margin-bottom: 6px; cursor: pointer;">
+        📋 Copia Link di Sincronizzazione
+      </button>
+      <div id="syncLinkCopyFeedback" style="font-size: 0.75rem; color: #34D399; display: none; margin-top: 4px; font-weight: 600;">
+        ✅ Link copiato! Mandalo su WhatsApp o AirDrop.
+      </div>
+    </div>
+  </div>
+
+  <!-- QR Code Library & App Script -->
+  <script src="./qrcode.min.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

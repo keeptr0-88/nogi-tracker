@@ -139,6 +139,7 @@ let selectedTech = null;
 // --- Initialize App ---
 function init() {
   loadData();
+  checkUrlForSyncData();
   setupEventListeners();
   renderTechniques();
   renderStats();
@@ -241,6 +242,35 @@ function setupEventListeners() {
   const clearDataBtn = document.getElementById('clearDataBtn');
   if (clearDataBtn) {
     clearDataBtn.addEventListener('click', handleClearData);
+  }
+
+  // Sync Modal actions
+  const openSyncBtn = document.getElementById('openSyncModalBtn');
+  if (openSyncBtn) {
+    openSyncBtn.addEventListener('click', openSyncModal);
+  }
+
+  const openSyncCardBtn = document.getElementById('openSyncModalCardBtn');
+  if (openSyncCardBtn) {
+    openSyncCardBtn.addEventListener('click', openSyncModal);
+  }
+
+  const closeSyncBtn = document.getElementById('closeSyncModalBtn');
+  const syncModal = document.getElementById('syncModal');
+  if (closeSyncBtn && syncModal) {
+    closeSyncBtn.addEventListener('click', () => {
+      syncModal.style.display = 'none';
+    });
+    syncModal.addEventListener('click', (e) => {
+      if (e.target === syncModal) {
+        syncModal.style.display = 'none';
+      }
+    });
+  }
+
+  const copySyncLinkBtn = document.getElementById('copySyncLinkBtn');
+  if (copySyncLinkBtn) {
+    copySyncLinkBtn.addEventListener('click', handleCopySyncLink);
   }
 }
 
@@ -631,6 +661,128 @@ function handleClearData() {
     renderFeed();
     renderTechniques();
     showToast('🧹 Tutti i dati sono stati cancellati.');
+  }
+}
+
+// --- QR / Device Synchronization Engine ---
+function checkUrlForSyncData() {
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    let syncPayload = urlParams.get('sync');
+    
+    if (!syncPayload && window.location.hash.includes('sync=')) {
+      const match = window.location.hash.match(/sync=([^&]+)/);
+      if (match) syncPayload = match[1];
+    }
+
+    if (syncPayload) {
+      const jsonStr = decodeURIComponent(escape(atob(decodeURIComponent(syncPayload))));
+      const data = JSON.parse(jsonStr);
+
+      if (Array.isArray(data.logs) && data.logs.length > 0) {
+        let addedCount = 0;
+        const existingIds = new Set(logs.map(l => l.id));
+
+        data.logs.forEach(newLog => {
+          if (!existingIds.has(newLog.id)) {
+            logs.push(newLog);
+            existingIds.add(newLog.id);
+            addedCount++;
+          }
+        });
+
+        if (Array.isArray(data.customTechs)) {
+          const existingTechIds = new Set(customTechs.map(t => t.id));
+          data.customTechs.forEach(t => {
+            if (!existingTechIds.has(t.id)) {
+              customTechs.push(t);
+              existingTechIds.add(t.id);
+            }
+          });
+        }
+
+        logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        saveData();
+
+        const cleanUrl = window.location.origin + window.location.pathname;
+        window.history.replaceState({}, document.title, cleanUrl);
+
+        setTimeout(() => {
+          showToast(`🎉 Sincronizzati ${addedCount} tap con successo!`);
+          triggerHaptic();
+          updateTotalHeader();
+          renderStats();
+          renderBadges();
+          renderFeed();
+          renderTechniques();
+        }, 400);
+      }
+    }
+  } catch (err) {
+    console.error('Errore durante la sincronizzazione:', err);
+    showToast('⚠️ Errore durante la sincronizzazione');
+  }
+}
+
+function generateSyncUrl() {
+  const payload = {
+    logs: logs,
+    customTechs: customTechs
+  };
+  const jsonStr = JSON.stringify(payload);
+  const encoded = encodeURIComponent(btoa(unescape(encodeURIComponent(jsonStr))));
+  return `${window.location.origin}${window.location.pathname}?sync=${encoded}`;
+}
+
+function openSyncModal() {
+  const modal = document.getElementById('syncModal');
+  const container = document.getElementById('qrcodeContainer');
+  if (!modal || !container) return;
+
+  if (logs.length === 0) {
+    showToast('⚠️ Non ci sono tap registrati da sincronizzare!');
+    return;
+  }
+
+  container.innerHTML = '';
+  const syncUrl = generateSyncUrl();
+
+  if (typeof QRCode !== 'undefined') {
+    new QRCode(container, {
+      text: syncUrl,
+      width: 220,
+      height: 220,
+      colorDark: "#000000",
+      colorLight: "#ffffff",
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  } else {
+    container.innerHTML = '<p style="color:#000; font-size:0.8rem; padding:10px;">Caricamento QR Code...</p>';
+  }
+
+  modal.style.display = 'flex';
+}
+
+function handleCopySyncLink() {
+  if (logs.length === 0) {
+    showToast('⚠️ Non ci sono tap registrati da sincronizzare!');
+    return;
+  }
+
+  const syncUrl = generateSyncUrl();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(syncUrl).then(() => {
+      const feedback = document.getElementById('syncLinkCopyFeedback');
+      if (feedback) {
+        feedback.style.display = 'block';
+        setTimeout(() => feedback.style.display = 'none', 3500);
+      }
+      showToast('📋 Link di sincronizzazione copiato!');
+    }).catch(() => {
+      prompt('Copia questo link di sincronizzazione e aprilo su iPhone:', syncUrl);
+    });
+  } else {
+    prompt('Copia questo link di sincronizzazione e aprilo su iPhone:', syncUrl);
   }
 }
 

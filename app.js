@@ -311,6 +311,11 @@ const VALID_CATEGORIES = new Set(['chokes', 'leglocks', 'armlocks', 'custom']);
 const STORAGE_KEY = 'sublog_nogi_logs_v1';
 const CUSTOM_TECH_KEY = 'sublog_custom_techs_v1';
 const MAX_SYNC_URL_LENGTH = 6000;
+// iPhone cameras reliably scan on-screen QR codes up to roughly this many
+// characters (byte mode, EC level M). Anything bigger renders as an
+// ultra-dense, unscannable code — so we QR a recent subset instead.
+const QR_MAX_CHARS = 1500;
+const QR_RENDER_PX = 280;
 
 function generateId(prefix) {
   try {
@@ -1167,13 +1172,64 @@ function handleClearData() {
 }
 
 // --- QR / Device Synchronization Engine ---
+// Payload v2 (compact): logs are positional arrays [id, epochMs, beltIdx,
+// techId, notes] and technique names/categories are rehydrated from the
+// bundled custom techniques + built-in list. Roughly halves URL length.
+// v1 payloads ({logs:[{...}], ...} and raw arrays) still decode.
+const BELT_ORDER = ['white', 'blue', 'purple', 'brown', 'black'];
+
 function encodeSyncPayload(data) {
-  const json = JSON.stringify(data);
+  const logs = Array.isArray(data.logs) ? data.logs : (Array.isArray(data) ? data : []);
+  const techs = Array.isArray(data.customTechs)
+    ? data.customTechs
+    : (Array.isArray(data.customTechniques) ? data.customTechniques : []);
+  const compact = {
+    v: 2,
+    l: logs.map(l => [
+      l.id,
+      Date.parse(l.timestamp) || 0,
+      BELT_ORDER.indexOf(l.belt),
+      l.techId,
+      l.notes || ''
+    ]),
+    t: techs
+  };
+  const json = JSON.stringify(compact);
   const bytes = new TextEncoder().encode(json);
   let binary = '';
   bytes.forEach(b => { binary += String.fromCharCode(b); });
   const b64 = btoa(binary);
   return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function expandCompactPayload(obj) {
+  const techById = {};
+  TECHNIQUES.forEach(t => { techById[t.id] = t; });
+  (Array.isArray(obj.t) ? obj.t : []).forEach(t => {
+    if (t && t.id) techById[t.id] = t;
+  });
+  customTechs.forEach(t => { if (t && t.id && !techById[t.id]) techById[t.id] = t; });
+
+  const logs = (Array.isArray(obj.l) ? obj.l : []).map(entry => {
+    if (!Array.isArray(entry)) return null;
+    const [id, epochMs, beltIdx, techId, notes] = entry;
+    const known = techById[techId];
+    const ms = typeof epochMs === 'number' && isFinite(epochMs) && epochMs > 0 ? epochMs : Date.now();
+    return {
+      id,
+      timestamp: new Date(ms).toISOString(),
+      belt: BELT_ORDER[beltIdx],
+      techId,
+      techName: known ? known.name : String(techId || 'Tecnica sconosciuta'),
+      category: known ? known.category : 'custom',
+      notes: typeof notes === 'string' ? notes : ''
+    };
+  });
+
+  return {
+    logs,
+    customTechs: Array.isArray(obj.t) ? obj.t : []
+  };
 }
 
 function decodeSyncPayload(str) {
@@ -1186,7 +1242,9 @@ function decodeSyncPayload(str) {
   const binary = atob(b64);
   const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
   const json = new TextDecoder().decode(bytes);
-  return JSON.parse(json);
+  const parsed = JSON.parse(json);
+  if (parsed && parsed.v === 2) return expandCompactPayload(parsed);
+  return parsed;
 }
 
 function extractSyncPayload(raw) {
@@ -1343,8 +1401,8 @@ function renderLocalQrCode(container, text) {
     try {
       new QRCode(container, {
         text: text,
-        width: 220,
-        height: 220,
+        width: QR_RENDER_PX,
+        height: QR_RENDER_PX,
         colorDark: '#000000',
         colorLight: '#ffffff',
         correctLevel: QRCode.CorrectLevel.M
@@ -1355,6 +1413,29 @@ function renderLocalQrCode(container, text) {
     }
   }
   return false;
+}
+
+// How many of the most recent logs fit in a scannable QR code?
+// Returns 0 when not even one fits (then only link/backup remain).
+function countQrFittingLogs() {
+  if (logs.length === 0) return 0;
+  const full = encodeSyncPayload({ logs, customTechs });
+  if (full.length <= QR_MAX_CHARS) return logs.length;
+  const perLog = full.length / logs.length;
+  let n = Math.max(1, Math.min(logs.length - 1, Math.floor(QR_MAX_CHARS / perLog)));
+  while (n > 0) {
+    const size = encodeSyncPayload({ logs: logs.slice(0, n), customTechs }).length;
+    if (size <= QR_MAX_CHARS) return n;
+    n--;
+  }
+  return 0;
+}
+
+function syncUrlForFirstN(n) {
+  const payload = { logs: logs.slice(0, n), customTechs };
+  const encoded = encodeSyncPayload(payload);
+  const base = window.location.origin + window.location.pathname;
+  return `${base}?sync=${encoded}`;
 }
 
 function openSyncModal() {
@@ -1368,6 +1449,8 @@ function openSyncModal() {
   }
 
   container.innerHTML = '';
+  const staleNote = document.getElementById('qrSubsetNote');
+  if (staleNote) staleNote.remove();
   let syncUrl;
   try {
     syncUrl = generateSyncUrl();
@@ -1376,31 +1459,43 @@ function openSyncModal() {
     showToast('⚠️ Errore nella generazione del link!');
     return;
   }
-
-  if (syncUrl.length > MAX_SYNC_URL_LENGTH) {
-    container.innerHTML = '<p style="color:#000; font-size:0.8rem; padding:10px; max-width:220px;">Troppi dati per un QR code. Usa "Copia Link" o il Backup JSON.</p>';
-    // Still store for copy button
-    modal.dataset.syncUrl = syncUrl;
-    modal.style.display = 'flex';
-    showToast('⚠️ Troppi tap per il QR: usa Copia Link o Backup JSON');
-    return;
-  }
   modal.dataset.syncUrl = syncUrl;
 
+  let qrUrl = syncUrl;
+  let qrNote = '';
+  if (syncUrl.length > QR_MAX_CHARS) {
+    const fitting = countQrFittingLogs();
+    if (fitting <= 0) {
+      container.innerHTML = '<p style="color:#000; font-size:0.8rem; padding:10px; max-width:240px;">Troppi dati per un QR code. Usa "Copia Link" o il Backup JSON qui sotto.</p>';
+      modal.style.display = 'flex';
+      showToast('⚠️ Troppi tap per il QR: usa Copia Link o Backup JSON');
+      return;
+    }
+    qrUrl = syncUrlForFirstN(fitting);
+    qrNote = `QR con gli ultimi ${fitting} tap su ${logs.length} — per tutti usa "Copia Link".`;
+  }
+
   // Privacy-first: generate QR locally (offline). Remote API only as fallback.
-  const ok = renderLocalQrCode(container, syncUrl);
+  const ok = renderLocalQrCode(container, qrUrl);
   if (!ok) {
     const qrImg = document.createElement('img');
-    qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=${encodeURIComponent(syncUrl)}`;
+    qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=${QR_RENDER_PX}x${QR_RENDER_PX}&margin=8&data=${encodeURIComponent(qrUrl)}`;
     qrImg.alt = 'QR Code Sincronizzazione';
-    qrImg.style.width = '240px';
-    qrImg.style.height = '240px';
+    qrImg.style.width = QR_RENDER_PX + 'px';
+    qrImg.style.height = QR_RENDER_PX + 'px';
     qrImg.style.display = 'block';
     qrImg.style.borderRadius = '12px';
     qrImg.onerror = () => {
       container.innerHTML = '<p style="color:#000; font-size:0.8rem; padding:10px;">Usa il pulsante "Copia Link" qui sotto</p>';
     };
     container.appendChild(qrImg);
+  }
+  if (qrNote) {
+    const note = document.createElement('p');
+    note.id = 'qrSubsetNote';
+    note.style.cssText = 'color:#000; font-size:0.75rem; padding:8px 4px 0; max-width:250px; font-weight:600;';
+    note.textContent = qrNote;
+    container.parentElement.insertBefore(note, container.nextSibling);
   }
 
   modal.style.display = 'flex';

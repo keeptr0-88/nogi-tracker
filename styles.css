@@ -690,3 +690,10 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* QR codes must scale crisply — blurred modules won't scan */
+#qrcodeContainer img,
+#qrcodeContainer canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}

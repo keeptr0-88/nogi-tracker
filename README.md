@@ -47,5 +47,5 @@ Qualsiasi hosting statico va bene. Su GitHub Pages: Settings → Pages → Branc
 ## Note tecniche
 
 - Storage: due chiavi LocalStorage (`sublog_nogi_logs_v1`, `sublog_custom_techs_v1`). I record non validi in import/sync vengono scartati, non bloccano.
-- Il sync codifica l'intero dataset in un URL (base64url). Sopra ~6000 caratteri il QR non viene generato: usare copia-link o backup JSON.
+- Il sync codifica il dataset in un URL (base64url, formato compatto v2; i link v1 restano leggibili). Il QR mostra al massimo ~1500 caratteri: oltre, viene offerto un QR con i tap più recenti, oppure copia-link / backup JSON per il dataset completo.
 - Cache PWA versionata (`sublog-nogi-vN` in `sw.js`): ad ogni cambio di asset cached, alzare la versione.

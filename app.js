@@ -185,6 +185,50 @@ function renderCalendar() {
   }
 }
 
+function getDistinctMonthKeys(logs) {
+  const months = new Set();
+  logs.forEach(l => {
+    const d = new Date(l.timestamp);
+    if (!isNaN(d.getTime())) months.add(d.getUTCFullYear() + '-' + d.getUTCMonth());
+  });
+  return months;
+}
+
+function getMaxConsecutiveMonths(logs) {
+  const nums = [...getDistinctMonthKeys(logs)].map(k => {
+    const [y, m] = k.split('-').map(Number);
+    return y * 12 + m;
+  }).sort((a, b) => a - b);
+  let best = nums.length ? 1 : 0, run = 1;
+  for (let i = 1; i < nums.length; i++) {
+    if (nums[i] === nums[i - 1] + 1) {
+      run++;
+      if (run > best) best = run;
+    } else if (nums[i] !== nums[i - 1]) {
+      run = 1;
+    }
+  }
+  return best;
+}
+
+function countWeekendTaps(logs) {
+  return logs.filter(l => {
+    const d = new Date(l.timestamp);
+    if (isNaN(d.getTime())) return false;
+    const g = d.getDay();
+    return g === 0 || g === 6;
+  }).length;
+}
+
+function hasTapInHourRange(logs, from, to) {
+  return logs.some(l => {
+    const d = new Date(l.timestamp);
+    if (isNaN(d.getTime())) return false;
+    const h = d.getHours();
+    return h >= from && h < to;
+  });
+}
+
 function hasTripleThreatDay(logs) {
   const byDay = {};
   logs.forEach(l => {
@@ -525,6 +569,93 @@ const BADGES_CONFIG = [
       const cats = new Set(logs.map(l => l.category));
       return cats.has('chokes') && cats.has('leglocks') && cats.has('armlocks') && cats.has('custom');
     }
+  },
+  // --- Leggende e riti ---
+  {
+    id: 'vannacciano',
+    icon: '🫡',
+    title: 'Vannacciano',
+    desc: '20 strangolamenti. Qui il mondo non è al contrario: comandi tu.',
+    check: (logs) => logs.filter(l => l.category === 'chokes').length >= 20
+  },
+  {
+    id: 'kali_yuga',
+    icon: '🌑',
+    title: 'KALI YUGA',
+    desc: "Un tap registrato nel cuore della notte (00:00–05:00). L'era oscura.",
+    check: (logs) => hasTapInHourRange(logs, 0, 5)
+  },
+  {
+    id: 'alba',
+    icon: '🌅',
+    title: "Prima dell'Alba",
+    desc: 'Un tap registrato tra le 05:00 e le 08:00. Chi dorme non finalizza.',
+    check: (logs) => hasTapInHourRange(logs, 5, 8)
+  },
+  {
+    id: 'weekend_warrior',
+    icon: '🏖️',
+    title: 'Weekend Warrior',
+    desc: '10 tap di sabato o domenica.',
+    check: (logs) => countWeekendTaps(logs) >= 10
+  },
+  {
+    id: 'three_months',
+    icon: '📆',
+    title: 'Tre Mesi di Guerra',
+    desc: 'Tap in 3 mesi di calendario consecutivi.',
+    check: (logs) => getMaxConsecutiveMonths(logs) >= 3
+  },
+  {
+    id: 'perfect_week',
+    icon: '📈',
+    title: 'Settimana Perfetta',
+    desc: 'Tap in 7 giorni consecutivi.',
+    check: (logs) => getMaxDayStreak(logs) >= 7
+  },
+  {
+    id: 'full_year',
+    icon: '🗓️',
+    title: 'Anno Intero',
+    desc: 'Tap in 12 mesi diversi. La costanza è tutto.',
+    check: (logs) => getDistinctMonthKeys(logs).size >= 12
+  },
+  // --- Specialisti extra ---
+  {
+    id: 'north_south_master',
+    icon: '🧭',
+    title: 'Croce del Nord',
+    desc: '3 North-South Choke messi a segno.',
+    check: (logs) => logs.filter(l => l.techId === 'north_south').length >= 3
+  },
+  {
+    id: 'anaconda_squeeze',
+    icon: '🌀',
+    title: 'Anaconda Squeeze',
+    desc: '3 Anaconda Choke messi a segno.',
+    check: (logs) => logs.filter(l => l.techId === 'anaconda').length >= 3
+  },
+  {
+    id: 'foot_collector',
+    icon: '🦶',
+    title: 'Collezionista di Piedi',
+    desc: '3 Toe Hold o Calf Slicer messi a segno.',
+    check: (logs) => logs.filter(l => ['toe_hold', 'calf_slicer'].includes(l.techId)).length >= 3
+  },
+  // --- Meta ---
+  {
+    id: 'custom_master',
+    icon: '🔬',
+    title: 'Maestro Custom',
+    desc: 'Crea 3 mosse personalizzate.',
+    check: () => customTechs.length >= 3
+  },
+  {
+    id: 'biografo',
+    icon: '📖',
+    title: 'Biografo',
+    desc: 'Aggiungi note a 25 sottomissioni.',
+    check: (logs) => logs.filter(l => l.notes && l.notes.trim()).length >= 25
   }
 ];
 

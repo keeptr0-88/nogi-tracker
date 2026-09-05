@@ -272,6 +272,11 @@ function setupEventListeners() {
   if (copySyncLinkBtn) {
     copySyncLinkBtn.addEventListener('click', handleCopySyncLink);
   }
+
+  const manualSyncBtn = document.getElementById('manualSyncBtn');
+  if (manualSyncBtn) {
+    manualSyncBtn.addEventListener('click', handleManualSyncInput);
+  }
 }
 
 function switchTab(viewName) {
@@ -665,62 +670,86 @@ function handleClearData() {
 }
 
 // --- QR / Device Synchronization Engine ---
+function encodeSyncPayload(data) {
+  const json = JSON.stringify(data);
+  const b64 = btoa(encodeURIComponent(json).replace(/%([0-9A-F]{2})/g, (match, p1) => {
+    return String.fromCharCode('0x' + p1);
+  }));
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function decodeSyncPayload(str) {
+  let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (b64.length % 4) b64 += '=';
+  const json = decodeURIComponent(Array.prototype.map.call(atob(b64), (c) => {
+    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+  }).join(''));
+  return JSON.parse(json);
+}
+
+function applySyncData(data) {
+  if (!data || (!Array.isArray(data.logs) && !Array.isArray(data))) {
+    showToast('⚠️ Dati di sincronizzazione non validi!');
+    return;
+  }
+
+  const incomingLogs = Array.isArray(data.logs) ? data.logs : data;
+  let addedCount = 0;
+  const existingIds = new Set(logs.map(l => l.id));
+
+  incomingLogs.forEach(newLog => {
+    if (newLog && newLog.id && !existingIds.has(newLog.id)) {
+      logs.push(newLog);
+      existingIds.add(newLog.id);
+      addedCount++;
+    }
+  });
+
+  if (Array.isArray(data.customTechs)) {
+    const existingTechIds = new Set(customTechs.map(t => t.id));
+    data.customTechs.forEach(t => {
+      if (t && t.id && !existingTechIds.has(t.id)) {
+        customTechs.push(t);
+        existingTechIds.add(t.id);
+      }
+    });
+  }
+
+  logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  saveData();
+
+  updateTotalHeader();
+  renderStats();
+  renderBadges();
+  renderFeed();
+  renderTechniques();
+  triggerHaptic();
+
+  showToast(`🎉 Sincronizzati ${addedCount} tap con successo!`);
+}
+
 function checkUrlForSyncData() {
   try {
     const urlParams = new URLSearchParams(window.location.search);
-    let syncPayload = urlParams.get('sync');
+    let syncPayload = urlParams.get('sync') || urlParams.get('s');
     
-    if (!syncPayload && window.location.hash.includes('sync=')) {
-      const match = window.location.hash.match(/sync=([^&]+)/);
+    if (!syncPayload && window.location.hash) {
+      const hash = window.location.hash.slice(1);
+      const match = hash.match(/(?:sync|s)=([^&]+)/);
       if (match) syncPayload = match[1];
     }
 
     if (syncPayload) {
-      const jsonStr = decodeURIComponent(escape(atob(decodeURIComponent(syncPayload))));
-      const data = JSON.parse(jsonStr);
+      const data = decodeSyncPayload(syncPayload);
+      applySyncData(data);
 
-      if (Array.isArray(data.logs) && data.logs.length > 0) {
-        let addedCount = 0;
-        const existingIds = new Set(logs.map(l => l.id));
-
-        data.logs.forEach(newLog => {
-          if (!existingIds.has(newLog.id)) {
-            logs.push(newLog);
-            existingIds.add(newLog.id);
-            addedCount++;
-          }
-        });
-
-        if (Array.isArray(data.customTechs)) {
-          const existingTechIds = new Set(customTechs.map(t => t.id));
-          data.customTechs.forEach(t => {
-            if (!existingTechIds.has(t.id)) {
-              customTechs.push(t);
-              existingTechIds.add(t.id);
-            }
-          });
-        }
-
-        logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        saveData();
-
-        const cleanUrl = window.location.origin + window.location.pathname;
-        window.history.replaceState({}, document.title, cleanUrl);
-
-        setTimeout(() => {
-          showToast(`🎉 Sincronizzati ${addedCount} tap con successo!`);
-          triggerHaptic();
-          updateTotalHeader();
-          renderStats();
-          renderBadges();
-          renderFeed();
-          renderTechniques();
-        }, 400);
-      }
+      // Clean URL bar
+      const cleanUrl = window.location.origin + window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
     }
   } catch (err) {
-    console.error('Errore durante la sincronizzazione:', err);
-    showToast('⚠️ Errore durante la sincronizzazione');
+    console.error('Errore durante la decodifica del sync payload:', err);
+    showToast('⚠️ Errore nel link di sincronizzazione');
   }
 }
 
@@ -729,9 +758,8 @@ function generateSyncUrl() {
     logs: logs,
     customTechs: customTechs
   };
-  const jsonStr = JSON.stringify(payload);
-  const encoded = encodeURIComponent(btoa(unescape(encodeURIComponent(jsonStr))));
-  return `${window.location.origin}${window.location.pathname}?sync=${encoded}`;
+  const encoded = encodeSyncPayload(payload);
+  return `https://keeptr0-88.github.io/nogi-tracker/?sync=${encoded}`;
 }
 
 function openSyncModal() {
@@ -747,19 +775,36 @@ function openSyncModal() {
   container.innerHTML = '';
   const syncUrl = generateSyncUrl();
 
-  if (typeof QRCode !== 'undefined') {
-    new QRCode(container, {
-      text: syncUrl,
-      width: 220,
-      height: 220,
-      colorDark: "#000000",
-      colorLight: "#ffffff",
-      correctLevel: QRCode.CorrectLevel.M
-    });
-  } else {
-    container.innerHTML = '<p style="color:#000; font-size:0.8rem; padding:10px;">Caricamento QR Code...</p>';
-  }
+  // Create high-clarity QR Code via QRServer API (super easy for iOS camera to scan)
+  const qrImg = document.createElement('img');
+  qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=${encodeURIComponent(syncUrl)}`;
+  qrImg.alt = 'QR Code Sincronizzazione';
+  qrImg.style.width = '240px';
+  qrImg.style.height = '240px';
+  qrImg.style.display = 'block';
+  qrImg.style.borderRadius = '12px';
 
+  // Fallback to local qrcode.min.js canvas if offline
+  qrImg.onerror = () => {
+    container.innerHTML = '';
+    if (typeof QRCode !== 'undefined') {
+      try {
+        new QRCode(container, {
+          text: syncUrl,
+          width: 220,
+          height: 220,
+          colorDark: "#000000",
+          colorLight: "#ffffff",
+          correctLevel: QRCode.CorrectLevel.L
+        });
+      } catch (e) {
+        console.error('QR code generation error:', e);
+        container.innerHTML = '<p style="color:#000; font-size:0.8rem; padding:10px;">Usa il pulsante "Copia Link" qui sotto</p>';
+      }
+    }
+  };
+
+  container.appendChild(qrImg);
   modal.style.display = 'flex';
 }
 
@@ -783,6 +828,34 @@ function handleCopySyncLink() {
     });
   } else {
     prompt('Copia questo link di sincronizzazione e aprilo su iPhone:', syncUrl);
+  }
+}
+
+function handleManualSyncInput() {
+  const input = document.getElementById('manualSyncInput');
+  if (!input) return;
+
+  const val = input.value.trim();
+  if (!val) {
+    showToast('⚠️ Incolla prima il link o codice di sincronizzazione!');
+    return;
+  }
+
+  try {
+    let payload = val;
+    // If a full URL was pasted, extract the sync parameter
+    if (val.includes('sync=')) {
+      payload = val.split('sync=')[1].split('&')[0];
+    } else if (val.includes('s=')) {
+      payload = val.split('s=')[1].split('&')[0];
+    }
+
+    const data = decodeSyncPayload(payload);
+    applySyncData(data);
+    input.value = '';
+  } catch (err) {
+    console.error('Errore importazione manuale:', err);
+    showToast('⚠️ Codice o link non valido!');
   }
 }
 

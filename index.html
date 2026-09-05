@@ -202,22 +202,28 @@
       <div class="card">
         <div class="card-title">Distribuzione Tecniche</div>
         <div style="display: flex; flex-direction: column; gap: 8px; font-size: 0.88rem;">
-          <div style="display: flex; justify-content: space-between;">
-            <span style="color: var(--text-secondary);">Strangolamenti (Chokes):</span>
+          <div class="cat-row-toggle" data-catrow="chokes" role="button" tabindex="0" aria-expanded="false" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+            <span style="color: var(--text-secondary);"><span class="cat-chevron">▾</span> Strangolamenti (Chokes):</span>
             <strong id="statChokesCount">0 (0%)</strong>
           </div>
-          <div style="display: flex; justify-content: space-between;">
-            <span style="color: var(--text-secondary);">Leg Locks:</span>
+          <div class="tech-breakdown" id="breakdown-chokes" hidden></div>
+          <div class="cat-row-toggle" data-catrow="leglocks" role="button" tabindex="0" aria-expanded="false" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+            <span style="color: var(--text-secondary);"><span class="cat-chevron">▾</span> Leg Locks:</span>
             <strong id="statLegsCount">0 (0%)</strong>
           </div>
-          <div style="display: flex; justify-content: space-between;">
-            <span style="color: var(--text-secondary);">Leve Braccia:</span>
+          <div class="tech-breakdown" id="breakdown-leglocks" hidden></div>
+          <div class="cat-row-toggle" data-catrow="armlocks" role="button" tabindex="0" aria-expanded="false" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+            <span style="color: var(--text-secondary);"><span class="cat-chevron">▾</span> Leve Braccia:</span>
             <strong id="statArmsCount">0 (0%)</strong>
           </div>
+          <div class="tech-breakdown" id="breakdown-armlocks" hidden></div>
           <div id="statOtherRow" style="display: none; justify-content: space-between;">
-            <span style="color: var(--text-secondary);">Custom / Altre:</span>
-            <strong id="statOtherCount">0 (0%)</strong>
+            <div class="cat-row-toggle" data-catrow="other" role="button" tabindex="0" aria-expanded="false" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; flex: 1;">
+              <span style="color: var(--text-secondary);"><span class="cat-chevron">▾</span> Custom / Altre:</span>
+              <strong id="statOtherCount">0 (0%)</strong>
+            </div>
           </div>
+          <div class="tech-breakdown" id="breakdown-other" hidden></div>
         </div>
       </div>
 
@@ -351,11 +357,20 @@
       </div>
 
       <!-- About -->
-      <div class="card" style="text-align: center;">
+      <div class="card" id="aboutCard" style="text-align: center; cursor: pointer;" title="Tocca 5 volte...">
         <div style="font-weight: 800; font-size: 0.9rem;">SUB·LOG NO-GI TRACKER</div>
         <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
           Creato per l'arte marziale più letale. Osu! 🥋
         </div>
+      </div>
+
+      <!-- Easter egg: hidden credit, revealed by tapping the About card 5 times -->
+      <div id="fnEgg" class="card" style="display: none; text-align: center; border-color: #093d6a;">
+        <div style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 700;">Quest'app è sviluppata da</div>
+        <div style="font-size: 1rem; font-weight: 900; color: #FFF; letter-spacing: 1px; margin: 4px 0 12px;">FUTURO NAZIONALE</div>
+        <a id="fnEggLink" href="https://youtube.com/shorts/_r2uy3oP7gc" target="_blank" rel="noopener" aria-label="Apri il video di Futuro Nazionale">
+          <img src="./icons/futuro-nazionale.svg" alt="Logo Futuro Nazionale" width="120" height="120" style="width: 120px; height: 120px; border-radius: 50%;">
+        </a>
       </div>
     </main>
 
@@ -473,6 +488,7 @@
 
   <!-- QR Code Library & App Script -->
   <script src="./qrcode.min.js"></script>
+  <script src="./lz-string.min.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

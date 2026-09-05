@@ -125,6 +125,7 @@ function getMaxGapDays(logs) {
 }
 
 const HEATMAP_DAYS = 126; // 18 weeks
+const expandedCats = new Set();
 
 function heatLevel(count) {
   if (count <= 0) return 0;
@@ -673,12 +674,10 @@ const QR_MAX_CHARS = 1500;
 const QR_RENDER_PX = 280;
 
 function generateId(prefix) {
-  try {
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-      return prefix + '_' + crypto.randomUUID();
-    }
-  } catch (_) { /* fall through */ }
-  return prefix + '_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e9).toString(36);
+  // Short time-ordered ids (~18 chars vs 40 for UUIDs): the random tail of
+  // a UUID is incompressible noise, so shorter ids shrink every sync payload.
+  const rand = Math.random().toString(36).slice(2, 7);
+  return `${prefix}_${Date.now().toString(36)}${rand}`;
 }
 
 function sanitizeLog(entry) {
@@ -808,6 +807,17 @@ function setupEventListeners() {
     });
   });
 
+  // Expandable category breakdown rows in Stats
+  document.querySelectorAll('[data-catrow]').forEach(row => {
+    const toggle = () => toggleCatBreakdown(row.dataset.catrow);
+    row.addEventListener('click', toggle);
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  });
   // Submit button
   const submitBtn = document.getElementById('submitTapBtn');
   if (submitBtn) {
@@ -871,6 +881,12 @@ function setupEventListeners() {
   const cardBtn = document.getElementById('shareCardBtn');
   if (cardBtn) {
     cardBtn.addEventListener('click', shareStatCard);
+  }
+
+  // Easter egg trigger
+  const aboutCard = document.getElementById('aboutCard');
+  if (aboutCard) {
+    aboutCard.addEventListener('click', handleAboutTap);
   }
 
   const clearAllCustomBtn = document.getElementById('clearAllCustomBtn');
@@ -1283,6 +1299,74 @@ function renderStats() {
     const otherRow = document.getElementById('statOtherRow');
     if (otherRow) otherRow.style.display = otherCount > 0 ? 'flex' : 'none';
   }
+
+  renderBreakdowns();
+}
+
+// Per-technique breakdown within each category, sorted by count desc.
+// Pure (testable): { chokes: [{name, count, pct}], ... }
+function breakdownByCategory(logs) {
+  const buckets = { chokes: {}, leglocks: {}, armlocks: {}, other: {} };
+  logs.forEach(l => {
+    const bucket = (l.category === 'chokes' || l.category === 'leglocks' || l.category === 'armlocks')
+      ? l.category : 'other';
+    const key = l.techId || l.techName || '?';
+    if (!buckets[bucket][key]) buckets[bucket][key] = { name: l.techName || 'Sconosciuta', count: 0 };
+    buckets[bucket][key].count++;
+  });
+  const out = {};
+  Object.keys(buckets).forEach(b => {
+    const items = Object.values(buckets[b]);
+    const total = items.reduce((s, x) => s + x.count, 0);
+    out[b] = items
+      .map(x => ({ name: x.name, count: x.count, pct: total ? Math.round(x.count / total * 100) : 0 }))
+      .sort((a, b2) => b2.count - a.count);
+  });
+  return out;
+}
+
+function toggleCatBreakdown(cat) {
+  if (expandedCats.has(cat)) expandedCats.delete(cat);
+  else expandedCats.add(cat);
+  renderStats();
+}
+
+function renderBreakdowns() {
+  const groups = breakdownByCategory(logs);
+  [['chokes', 'breakdown-chokes'], ['leglocks', 'breakdown-leglocks'],
+   ['armlocks', 'breakdown-armlocks'], ['other', 'breakdown-other']].forEach(([cat, boxId]) => {
+    const box = document.getElementById(boxId);
+    const row = document.querySelector(`[data-catrow="${cat}"]`);
+    const items = groups[cat] || [];
+    const open = expandedCats.has(cat) && items.length > 0;
+    if (row) row.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (!box) return;
+    box.hidden = !open;
+    if (!open) return;
+    box.innerHTML = '';
+    const max = Math.max(1, ...items.map(i => i.count));
+    const frag = document.createDocumentFragment();
+    items.forEach(it => {
+      const r = document.createElement('div');
+      r.className = 'tech-breakdown-row';
+      const name = document.createElement('span');
+      name.className = 'tech-breakdown-name';
+      name.textContent = it.name;
+      name.title = it.name;
+      const bar = document.createElement('div');
+      bar.className = 'tech-breakdown-bar';
+      const fill = document.createElement('div');
+      fill.className = 'tech-breakdown-fill';
+      fill.style.width = `${Math.max(4, Math.round(it.count / max * 100))}%`;
+      bar.appendChild(fill);
+      const count = document.createElement('span');
+      count.className = 'tech-breakdown-count';
+      count.textContent = `${it.count} (${it.pct}%)`;
+      r.append(name, bar, count);
+      frag.appendChild(r);
+    });
+    box.appendChild(frag);
+  });
 }
 
 // --- Badges Rendering ---
@@ -1553,6 +1637,26 @@ function resetFeedFilters() {
   if (search) search.value = '';
   const beltSel = document.getElementById('feedBeltFilter');
   if (beltSel) beltSel.value = 'all';
+}
+
+// --- Easter egg: tap the About card 5 times (within 1.5s windows) ---
+let aboutTaps = 0;
+let aboutTapTimer = null;
+function handleAboutTap() {
+  const egg = document.getElementById('fnEgg');
+  if (!egg || egg.style.display !== 'none') return;
+  aboutTaps++;
+  if (aboutTapTimer) clearTimeout(aboutTapTimer);
+  if (aboutTaps >= 5) {
+    aboutTaps = 0;
+    aboutTapTimer = null;
+    egg.style.display = 'block';
+    egg.classList.add('egg-reveal');
+    showToast('🥚 Easter egg sbloccato!');
+    triggerHaptic();
+    return;
+  }
+  aboutTapTimer = setTimeout(() => { aboutTaps = 0; }, 1500);
 }
 
 // --- Backup, Export & Import ---
@@ -1853,11 +1957,28 @@ function encodeSyncPayload(data) {
     t: techs
   };
   const json = JSON.stringify(compact);
-  const bytes = new TextEncoder().encode(json);
+  // v3: LZ-string compression inside a base64url envelope. The '+' char is
+  // remapped (it would decode as a space in query strings); '$' and '-'
+  // survive URLs untouched.
+  if (typeof LZString !== 'undefined' && LZString.compressToEncodedURIComponent) {
+    const compressed = LZString.compressToEncodedURIComponent(json).replace(/\+/g, '~');
+    return bytesToB64Url(new TextEncoder().encode(JSON.stringify({ v: 3, c: compressed })));
+  }
+  return bytesToB64Url(new TextEncoder().encode(json)); // lib missing: plain v2
+}
+
+function bytesToB64Url(bytes) {
   let binary = '';
   bytes.forEach(b => { binary += String.fromCharCode(b); });
-  const b64 = btoa(binary);
-  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function b64UrlToJson(clean) {
+  let b64 = clean.replace(/-/g, '+').replace(/_/g, '/');
+  while (b64.length % 4) b64 += '=';
+  const binary = atob(b64);
+  const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
 }
 
 function expandCompactPayload(obj) {
@@ -1895,12 +2016,20 @@ function decodeSyncPayload(str) {
   const clean = str.trim();
   if (!/^[A-Za-z0-9\-_]+$/.test(clean)) throw new Error('Invalid payload characters');
   if (clean.length > 500000) throw new Error('Payload too large');
-  let b64 = clean.replace(/-/g, '+').replace(/_/g, '/');
-  while (b64.length % 4) b64 += '=';
-  const binary = atob(b64);
-  const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
-  const json = new TextDecoder().decode(bytes);
-  const parsed = JSON.parse(json);
+  const parsed = JSON.parse(b64UrlToJson(clean));
+  if (parsed && parsed.v === 3) {
+    if (typeof parsed.c !== 'string' || !/^[A-Za-z0-9\-$~]+$/.test(parsed.c)) {
+      throw new Error('Bad v3 payload');
+    }
+    if (typeof LZString === 'undefined' || !LZString.decompressFromEncodedURIComponent) {
+      throw new Error('Decoder unavailable');
+    }
+    const decomp = LZString.decompressFromEncodedURIComponent(parsed.c.replace(/~/g, '+'));
+    if (typeof decomp !== 'string' || !decomp) throw new Error('Decompression failed');
+    const inner = JSON.parse(decomp);
+    if (!inner || inner.v !== 2) throw new Error('Bad v3 inner payload');
+    return expandCompactPayload(inner);
+  }
   if (parsed && parsed.v === 2) return expandCompactPayload(parsed);
   return parsed;
 }

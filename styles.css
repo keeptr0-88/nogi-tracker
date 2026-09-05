@@ -731,3 +731,92 @@ body {
   font-size: 0.7rem;
   color: var(--text-muted);
 }
+
+/* Expandable per-category technique breakdown */
+.cat-row-toggle {
+  border-radius: 8px;
+  padding: 2px 4px;
+  margin: 0 -4px;
+}
+
+.cat-row-toggle:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cat-row-toggle:focus-visible {
+  outline: 2px solid #38BDF8;
+  outline-offset: 2px;
+}
+
+.cat-chevron {
+  display: inline-block;
+  font-size: 0.7rem;
+  margin-right: 4px;
+  transition: transform 0.2s ease;
+  color: var(--text-muted);
+}
+
+.cat-row-toggle[aria-expanded="true"] .cat-chevron {
+  transform: rotate(180deg);
+}
+
+.tech-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 6px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 10px;
+}
+
+.tech-breakdown[hidden] {
+  display: none;
+}
+
+.tech-breakdown-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+}
+
+.tech-breakdown-name {
+  flex: 0 0 42%;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tech-breakdown-bar {
+  flex: 1;
+  height: 8px;
+  background: #1E293B;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.tech-breakdown-fill {
+  height: 100%;
+  background: #38BDF8;
+  border-radius: 999px;
+}
+
+.tech-breakdown-count {
+  flex: 0 0 64px;
+  text-align: right;
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-size: 0.75rem;
+}
+
+/* Easter egg reveal */
+.egg-reveal {
+  animation: eggPop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes eggPop {
+  from { opacity: 0; transform: scale(0.85) rotate(-2deg); }
+  to { opacity: 1; transform: scale(1) rotate(0); }
+}

@@ -1,22 +1,30 @@
-const CACHE_NAME = 'sublog-nogi-v11';
+const CACHE_NAME = 'sublog-nogi-v13';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './styles.css',
   './app.js',
   './qrcode.min.js',
+  './lz-string.min.js',
   './manifest.json',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',
-  './icons/icon-180.png'
+  './icons/icon-180.png',
+  './icons/futuro-nazionale.svg'
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
+      // One missing asset must not fail the whole install: fall back to
+      // best-effort per-file caching.
+      return cache.addAll(ASSETS_TO_CACHE).catch(() => {
+        return Promise.all(
+          ASSETS_TO_CACHE.map((url) => cache.add(url).catch(() => {}))
+        );
+      });
     }).then(() => self.skipWaiting())
   );
 });

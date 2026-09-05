@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>SUB·LOG | No-Gi Grappling Tracker</title>
+  
+  <!-- iOS PWA Meta Tags -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SUB-LOG">
+  <meta name="theme-color" content="#080C14">
+
+  <!-- Icons -->
+  <link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
+  <link rel="apple-touch-icon" href="./icons/icon.svg">
+  <link rel="manifest" href="./manifest.json">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+  <!-- Toast Celebrations -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand-title">
+        <span>SUB·LOG</span>
+        <span class="brand-badge">NO-GI</span>
+      </div>
+      <div class="total-pill">
+        KILLS: <span id="headerTotalKills">0</span>
+      </div>
+    </header>
+
+    <!-- ================= VIEW 1: QUICK LOG ================= -->
+    <main id="view-log" class="view-content active">
+      <!-- Belt Selector -->
+      <div class="card">
+        <div class="card-title">
+          <span>1. Cintura Avversario</span>
+          <span style="font-size: 0.72rem; color: var(--text-muted);">RANKED NO-GI</span>
+        </div>
+        <div class="belts-grid">
+          <button type="button" class="belt-btn belt-white" data-belt="white">
+            <div class="belt-indicator"></div>
+            <span class="belt-name">Bianca</span>
+          </button>
+          <button type="button" class="belt-btn belt-blue" data-belt="blue">
+            <div class="belt-indicator"></div>
+            <span class="belt-name">Blu</span>
+          </button>
+          <button type="button" class="belt-btn belt-purple" data-belt="purple">
+            <div class="belt-indicator"></div>
+            <span class="belt-name">Viola</span>
+          </button>
+          <button type="button" class="belt-btn belt-brown" data-belt="brown">
+            <div class="belt-indicator"></div>
+            <span class="belt-name">Marrone</span>
+          </button>
+          <button type="button" class="belt-btn belt-black" data-belt="black">
+            <div class="belt-indicator"></div>
+            <span class="belt-name">Nera</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Submission Selector -->
+      <div class="card">
+        <div class="card-title">
+          <span>2. Finalizzazione Messa a Segno</span>
+        </div>
+
+        <!-- Filter Chips -->
+        <div class="category-filter">
+          <button type="button" class="cat-chip active" data-category="all">Tutte</button>
+          <button type="button" class="cat-chip" data-category="chokes">Strangolamenti</button>
+          <button type="button" class="cat-chip" data-category="leglocks">Leg Locks</button>
+          <button type="button" class="cat-chip" data-category="armlocks">Leve Braccia</button>
+        </div>
+
+        <!-- Techniques Grid -->
+        <div id="techniquesGrid" class="techniques-grid"></div>
+
+        <!-- Optional Custom Submission Addition -->
+        <details style="margin-top: 10px; font-size: 0.82rem; color: var(--text-secondary);">
+          <summary style="cursor: pointer; font-weight: 700; color: #38BDF8; margin-bottom: 8px;">
+            + Aggiungi mossa personalizzata
+          </summary>
+          <div style="display: flex; gap: 8px; margin-top: 6px;">
+            <input type="text" id="customTechInput" class="text-input" placeholder="Es. Twister, Z-Lock, Aoki Lock..." style="padding: 8px 12px; font-size: 0.82rem;">
+            <select id="customTechCat" class="text-input" style="width: auto; padding: 8px; font-size: 0.8rem;">
+              <option value="chokes">Choke</option>
+              <option value="leglocks">Leg</option>
+              <option value="armlocks">Leva</option>
+            </select>
+            <button type="button" id="addCustomTechBtn" class="cat-chip" style="background: var(--accent-red); color: #FFF; border: none; font-weight: 800;">
+              Salva
+            </button>
+          </div>
+        </details>
+      </div>
+
+      <!-- Notes / Context -->
+      <div class="card">
+        <div class="input-group" style="margin-bottom: 0;">
+          <label class="input-label" for="rollNotesInput">3. Note Roll (Opzionale)</label>
+          <input type="text" id="rollNotesInput" class="text-input" placeholder="Es. Dalla 50/50, Sparring partner, Dal back...">
+        </div>
+      </div>
+
+      <!-- Big Action Button -->
+      <button type="button" id="submitTapBtn" class="btn-primary">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+        </svg>
+        REGISTRA TAP (+1 KILL)
+      </button>
+    </main>
+
+    <!-- ================= VIEW 2: STATS ================= -->
+    <main id="view-stats" class="view-content">
+      <div class="stats-summary-grid">
+        <div class="metric-card">
+          <span class="metric-value" id="statTotalKills">0</span>
+          <span class="metric-label">Kill Totali</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-value" id="statSignaturePct" style="color: #38BDF8;">0%</span>
+          <span class="metric-label" id="statSignatureName">Signature Move</span>
+        </div>
+      </div>
+
+      <!-- Belt Trophies Progress -->
+      <div class="card">
+        <div class="card-title">Cinture Finalizzate</div>
+        
+        <div class="belt-stat-row">
+          <span class="belt-stat-label">⚪ Bianca</span>
+          <div class="belt-stat-bar-container">
+            <div id="belt-bar-white" class="belt-stat-bar-fill" style="background: var(--belt-white); width: 0%;"></div>
+          </div>
+          <span id="belt-count-white" class="belt-stat-count">0</span>
+        </div>
+
+        <div class="belt-stat-row">
+          <span class="belt-stat-label">🔵 Blu</span>
+          <div class="belt-stat-bar-container">
+            <div id="belt-bar-blue" class="belt-stat-bar-fill" style="background: var(--belt-blue); width: 0%;"></div>
+          </div>
+          <span id="belt-count-blue" class="belt-stat-count">0</span>
+        </div>
+
+        <div class="belt-stat-row">
+          <span class="belt-stat-label">🟣 Viola</span>
+          <div class="belt-stat-bar-container">
+            <div id="belt-bar-purple" class="belt-stat-bar-fill" style="background: var(--belt-purple); width: 0%;"></div>
+          </div>
+          <span id="belt-count-purple" class="belt-stat-count">0</span>
+        </div>
+
+        <div class="belt-stat-row">
+          <span class="belt-stat-label">🟤 Marrone</span>
+          <div class="belt-stat-bar-container">
+            <div id="belt-bar-brown" class="belt-stat-bar-fill" style="background: var(--belt-brown); width: 0%;"></div>
+          </div>
+          <span id="belt-count-brown" class="belt-stat-count">0</span>
+        </div>
+
+        <div class="belt-stat-row">
+          <span class="belt-stat-label">⚫ Nera</span>
+          <div class="belt-stat-bar-container">
+            <div id="belt-bar-black" class="belt-stat-bar-fill" style="background: #111827; border: 1px solid var(--accent-red); width: 0%;"></div>
+          </div>
+          <span id="belt-count-black" class="belt-stat-count">0</span>
+        </div>
+      </div>
+
+      <!-- Category Breakdown -->
+      <div class="card">
+        <div class="card-title">Distribuzione Tecniche</div>
+        <div style="display: flex; flex-direction: column; gap: 8px; font-size: 0.88rem;">
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--text-secondary);">Strangolamenti (Chokes):</span>
+            <strong id="statChokesCount">0 (0%)</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--text-secondary);">Leg Locks:</span>
+            <strong id="statLegsCount">0 (0%)</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--text-secondary);">Leve Braccia:</span>
+            <strong id="statArmsCount">0 (0%)</strong>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ================= VIEW 3: BADGES ================= -->
+    <main id="view-trofei" class="view-content">
+      <div class="card" style="margin-bottom: 12px; text-align: center;">
+        <div style="font-size: 0.95rem; font-weight: 800;">BACHECA OBIETTIVI</div>
+        <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">
+          Sblocca i trofei combattendo e finalizzando sul tatami.
+        </div>
+      </div>
+      <div id="badgesGrid" class="badges-grid"></div>
+    </main>
+
+    <!-- ================= VIEW 4: STORICO FEED ================= -->
+    <main id="view-feed" class="view-content">
+      <div class="card" style="margin-bottom: 12px;">
+        <div class="card-title">Registro Sparring</div>
+        <div style="font-size: 0.8rem; color: var(--text-muted);">
+          Cronologia di tutte le sottomissioni registrate.
+        </div>
+      </div>
+      <div id="recentFeedList"></div>
+    </main>
+
+    <!-- ================= VIEW 5: INFO & BACKUP ================= -->
+    <main id="view-info" class="view-content">
+      <!-- Backup Section -->
+      <div class="card">
+        <div class="card-title">Backup & Salvataggio</div>
+        <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 14px; line-height: 1.4;">
+          I tuoi dati sono salvati nella memoria del tuo iPhone. Puoi esportarli in un file per sicurezza o trasferirli su un altro dispositivo.
+        </p>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button type="button" id="exportDataBtn" class="cat-chip" style="background: #1E293B; color: #FFF; padding: 12px; text-align: center; border-color: #334155;">
+            💾 Scarica Backup JSON
+          </button>
+          
+          <label class="cat-chip" style="background: #1E293B; color: #FFF; padding: 12px; text-align: center; border-color: #334155; cursor: pointer;">
+            📥 Ripristina da Backup JSON
+            <input type="file" id="importFileInput" accept=".json" style="display: none;">
+          </label>
+
+          <button type="button" id="clearDataBtn" class="cat-chip" style="background: rgba(239, 68, 68, 0.1); color: #F87171; border-color: #EF4444; padding: 10px; margin-top: 6px;">
+            ⚠️ Cancella tutti i dati
+          </button>
+        </div>
+      </div>
+
+      <!-- iPhone Safari Install Guide -->
+      <div class="card">
+        <div class="card-title">Come installare su iPhone</div>
+        <ol style="padding-left: 20px; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6;">
+          <li>Apri il link su <strong>Safari</strong> nel tuo iPhone.</li>
+          <li>Tocca l'icona <strong>Condividi</strong> in basso (il quadrato con la freccia in su).</li>
+          <li>Scorri verso il basso e tocca <strong>"Aggiungi alla schermata Home"</strong>.</li>
+          <li>Tocca <strong>"Aggiungi"</strong> in alto a destra. Fatto!</li>
+        </ol>
+      </div>
+
+      <!-- About -->
+      <div class="card" style="text-align: center;">
+        <div style="font-weight: 800; font-size: 0.9rem;">SUB·LOG NO-GI TRACKER</div>
+        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">
+          Creato per l'arte marziale più letale. Osu! 🥋
+        </div>
+      </div>
+    </main>
+
+    <!-- Bottom Sticky Navigation Bar -->
+    <nav class="tab-bar">
+      <button type="button" class="tab-btn active" data-view="log">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+        </svg>
+        Log
+      </button>
+
+      <button type="button" class="tab-btn" data-view="stats">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="20" x2="18" y2="10"></line>
+          <line x1="12" y1="20" x2="12" y2="4"></line>
+          <line x1="6" y1="20" x2="6" y2="14"></line>
+        </svg>
+        Stats
+      </button>
+
+      <button type="button" class="tab-btn" data-view="trofei">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
+          <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+          <path d="M4 22h16"></path>
+          <path d="M10 14.66V17c0 .55-.45 1-1 1H7v2h10v-2h-2c-.55 0-1-.45-1-1v-2.34"></path>
+          <path d="M18 4H6v7a6 6 0 0 0 12 0V4Z"></path>
+        </svg>
+        Trofei
+      </button>
+
+      <button type="button" class="tab-btn" data-view="feed">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="8" y1="6" x2="21" y2="6"></line>
+          <line x1="8" y1="12" x2="21" y2="12"></line>
+          <line x1="8" y1="18" x2="21" y2="18"></line>
+          <line x1="3" y1="6" x2="3.01" y2="6"></line>
+          <line x1="3" y1="12" x2="3.01" y2="12"></line>
+          <line x1="3" y1="18" x2="3.01" y2="18"></line>
+        </svg>
+        Storico
+      </button>
+
+      <button type="button" class="tab-btn" data-view="info">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="16" x2="12" y2="12"></line>
+          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+        Info
+      </button>
+    </nav>
+  </div>
+
+  <!-- App Script -->
+  <script src="./app.js"></script>
+</body>
+</html>

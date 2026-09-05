@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sublog-nogi-v6';
+const CACHE_NAME = 'sublog-nogi-v7';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -6,7 +6,10 @@ const ASSETS_TO_CACHE = [
   './app.js',
   './qrcode.min.js',
   './manifest.json',
-  './icons/icon.svg'
+  './icons/icon.svg',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-180.png'
 ];
 
 self.addEventListener('install', (event) => {

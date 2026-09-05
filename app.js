@@ -43,6 +43,38 @@ const BELTS = [
   { id: 'black', name: 'Nera', label: '⚫ Nera', color: '#111827' }
 ];
 
+// Distinct training days (UTC) + longest consecutive-day streak.
+// Invalid timestamps are ignored so corrupt records can't break badges.
+function getDistinctDayKeys(logs) {
+  const days = new Set();
+  logs.forEach(l => {
+    const d = new Date(l.timestamp);
+    if (!isNaN(d.getTime())) {
+      days.add(d.getUTCFullYear() + '-' + d.getUTCMonth() + '-' + d.getUTCDate());
+    }
+  });
+  return days;
+}
+
+function getMaxDayStreak(logs) {
+  const keys = [...getDistinctDayKeys(logs)];
+  if (keys.length === 0) return 0;
+  const nums = keys.map(k => {
+    const [y, m, dd] = k.split('-').map(Number);
+    return Date.UTC(y, m, dd) / 86400000;
+  }).sort((a, b) => a - b);
+  let best = 1, run = 1;
+  for (let i = 1; i < nums.length; i++) {
+    if (nums[i] === nums[i - 1] + 1) {
+      run++;
+      if (run > best) best = run;
+    } else if (nums[i] !== nums[i - 1]) {
+      run = 1;
+    }
+  }
+  return best;
+}
+
 const BADGES_CONFIG = [
   {
     id: 'first_kill',
@@ -123,6 +155,152 @@ const BADGES_CONFIG = [
     title: 'Centurion',
     desc: '100 sottomissioni totali nel tuo carniere.',
     check: (logs) => logs.length >= 100
+  },
+  // --- Volumi extra ---
+  {
+    id: 'volume_50',
+    icon: '🛡️',
+    title: 'Veterano del Tatami',
+    desc: '50 sottomissioni totali registrate.',
+    check: (logs) => logs.length >= 50
+  },
+  {
+    id: 'volume_200',
+    icon: '🐐',
+    title: 'GOAT del Tatami',
+    desc: '200 sottomissioni totali registrate. Leggendario.',
+    check: (logs) => logs.length >= 200
+  },
+  // --- Cacciatori di cinture ---
+  {
+    id: 'white_washer',
+    icon: '🧼',
+    title: 'White Washer',
+    desc: '5 sottomissioni contro cinture Bianche.',
+    check: (logs) => logs.filter(l => l.belt === 'white').length >= 5
+  },
+  {
+    id: 'blue_hunter',
+    icon: '🦈',
+    title: 'Blue Hunter',
+    desc: '5 sottomissioni contro cinture Blu.',
+    check: (logs) => logs.filter(l => l.belt === 'blue').length >= 5
+  },
+  {
+    id: 'purple_reign',
+    icon: '💜',
+    title: 'Purple Reign',
+    desc: '5 sottomissioni contro cinture Viola.',
+    check: (logs) => logs.filter(l => l.belt === 'purple').length >= 5
+  },
+  {
+    id: 'brown_nightmare',
+    icon: '🐻',
+    title: 'Incubo delle Marroni',
+    desc: '3 sottomissioni contro cinture Marroni.',
+    check: (logs) => logs.filter(l => l.belt === 'brown').length >= 3
+  },
+  {
+    id: 'black_hunter',
+    icon: '⚔️',
+    title: 'Cacciatore di Nere',
+    desc: '3 sottomissioni contro cinture Nere.',
+    check: (logs) => logs.filter(l => l.belt === 'black').length >= 3
+  },
+  // --- Specialisti di tecnica ---
+  {
+    id: 'triangle_master',
+    icon: '🔺',
+    title: 'Triangolo Mortale',
+    desc: '5 Triangoli messi a segno.',
+    check: (logs) => logs.filter(l => l.techId === 'triangle').length >= 5
+  },
+  {
+    id: 'armbar_artist',
+    icon: '💪',
+    title: 'Armbreaker',
+    desc: '5 Armbar messi a segno.',
+    check: (logs) => logs.filter(l => l.techId === 'armbar').length >= 5
+  },
+  {
+    id: 'kimura_king',
+    icon: '🔑',
+    title: 'Kimura King',
+    desc: '5 Kimura messe a segno.',
+    check: (logs) => logs.filter(l => l.techId === 'kimura').length >= 5
+  },
+  {
+    id: 'heel_hook_horror',
+    icon: '🪝',
+    title: 'Heel Hook Horror',
+    desc: '5 Heel Hook (inside o outside) messi a segno.',
+    check: (logs) => logs.filter(l => ['inside_heel_hook', 'outside_heel_hook'].includes(l.techId)).length >= 5
+  },
+  {
+    id: 'guillotine_boia',
+    icon: '🗡️',
+    title: 'Boia della Ghigliottina',
+    desc: '5 Ghigliottine (high-elbow o arm-in) messe a segno.',
+    check: (logs) => logs.filter(l => ['guillotine_he', 'guillotine_ai'].includes(l.techId)).length >= 5
+  },
+  // --- Maestri di categoria ---
+  {
+    id: 'python',
+    icon: '🐍',
+    title: 'Pitone',
+    desc: '10 strangolamenti registrati.',
+    check: (logs) => logs.filter(l => l.category === 'chokes').length >= 10
+  },
+  {
+    id: 'armlock_ace',
+    icon: '🦾',
+    title: 'Armlock Ace',
+    desc: '10 leve articolari registrate.',
+    check: (logs) => logs.filter(l => l.category === 'armlocks').length >= 10
+  },
+  // --- Varietà e costanza ---
+  {
+    id: 'arsenal',
+    icon: '🧰',
+    title: 'Arsenale',
+    desc: 'Finalizza con 10 tecniche diverse.',
+    check: (logs) => new Set(logs.map(l => l.techId)).size >= 10
+  },
+  {
+    id: 'encyclopedia',
+    icon: '📚',
+    title: 'Enciclopedia',
+    desc: 'Finalizza con 15 tecniche diverse.',
+    check: (logs) => new Set(logs.map(l => l.techId)).size >= 15
+  },
+  {
+    id: 'on_fire',
+    icon: '🔥',
+    title: 'On Fire',
+    desc: 'Registra tap in 3 giorni consecutivi.',
+    check: (logs) => getMaxDayStreak(logs) >= 3
+  },
+  {
+    id: 'regular',
+    icon: '📅',
+    title: 'Tatami Regular',
+    desc: 'Registra tap in 10 giorni diversi.',
+    check: (logs) => getDistinctDayKeys(logs).size >= 10
+  },
+  // --- Meta ---
+  {
+    id: 'historian',
+    icon: '📝',
+    title: 'Storico del Tatami',
+    desc: 'Aggiungi note a 10 sottomissioni.',
+    check: (logs) => logs.filter(l => l.notes && l.notes.trim()).length >= 10
+  },
+  {
+    id: 'innovator',
+    icon: '🧪',
+    title: 'Innovatore',
+    desc: 'Crea la tua prima mossa personalizzata.',
+    check: () => customTechs.length >= 1
   }
 ];
 
@@ -174,6 +352,7 @@ let customTechs = [];
 let currentCategory = 'all';
 let selectedBelt = null;
 let selectedTech = null;
+let editingLogId = null;
 
 // --- Initialize App ---
 function init() {
@@ -279,6 +458,27 @@ function setupEventListeners() {
     addCustomBtn.addEventListener('click', handleAddCustomTechnique);
   }
 
+  const customTechInput = document.getElementById('customTechInput');
+  if (customTechInput) {
+    customTechInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleAddCustomTechnique();
+      }
+    });
+  }
+
+  // Notes field: Enter submits the tap
+  const notesInput = document.getElementById('rollNotesInput');
+  if (notesInput) {
+    notesInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleLogSubmission();
+      }
+    });
+  }
+
   const clearAllCustomBtn = document.getElementById('clearAllCustomBtn');
   if (clearAllCustomBtn) {
     clearAllCustomBtn.addEventListener('click', handleClearAllCustomTechniques);
@@ -333,6 +533,39 @@ function setupEventListeners() {
   if (manualSyncBtn) {
     manualSyncBtn.addEventListener('click', handleManualSyncInput);
   }
+
+  const manualSyncInput = document.getElementById('manualSyncInput');
+  if (manualSyncInput) {
+    manualSyncInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleManualSyncInput();
+      }
+    });
+  }
+
+  // Edit modal actions
+  const editModal = document.getElementById('editLogModal');
+  const closeEditBtn = document.getElementById('closeEditModalBtn');
+  if (closeEditBtn && editModal) {
+    closeEditBtn.addEventListener('click', closeEditModal);
+    editModal.addEventListener('click', (e) => {
+      if (e.target === editModal) closeEditModal();
+    });
+  }
+  const saveEditBtn = document.getElementById('saveEditLogBtn');
+  if (saveEditBtn) {
+    saveEditBtn.addEventListener('click', handleSaveEditLog);
+  }
+
+  // Esc closes any open modal
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const syncM = document.getElementById('syncModal');
+      if (syncM && syncM.style.display === 'flex') syncM.style.display = 'none';
+      closeEditModal();
+    }
+  });
 }
 
 function switchTab(viewName) {
@@ -740,7 +973,23 @@ function renderFeed() {
     `;
     delBtn.addEventListener('click', () => handleDeleteLog(log.id));
 
-    item.append(left, delBtn);
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn-delete-log';
+    editBtn.type = 'button';
+    editBtn.title = 'Modifica log';
+    editBtn.setAttribute('aria-label', `Modifica ${log.techName}`);
+    editBtn.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path>
+      </svg>
+    `;
+    editBtn.addEventListener('click', () => openEditLog(log.id));
+
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display: flex; align-items: center; gap: 2px; flex-shrink: 0;';
+    actions.append(editBtn, delBtn);
+
+    item.append(left, actions);
     fragment.appendChild(item);
   });
 
@@ -754,6 +1003,86 @@ function handleDeleteLog(id) {
     refreshAll();
     showToast('🗑️ Sottomissione rimossa.');
   }
+}
+
+// --- Edit Existing Log ---
+function openEditLog(id) {
+  const log = logs.find(l => l.id === id);
+  if (!log) return;
+  editingLogId = id;
+
+  const techSelect = document.getElementById('editLogTech');
+  if (techSelect) {
+    techSelect.innerHTML = '';
+    getAllTechniques().forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = t.name;
+      if (t.id === log.techId) opt.selected = true;
+      techSelect.appendChild(opt);
+    });
+    // Logged technique deleted meanwhile: keep showing the stored name
+    if (![...techSelect.options].some(o => o.value === log.techId)) {
+      const opt = document.createElement('option');
+      opt.value = log.techId;
+      opt.textContent = log.techName;
+      opt.selected = true;
+      techSelect.appendChild(opt);
+    }
+  }
+
+  const beltSelect = document.getElementById('editLogBelt');
+  if (beltSelect) beltSelect.value = VALID_BELTS.has(log.belt) ? log.belt : 'white';
+
+  const notesInput = document.getElementById('editLogNotes');
+  if (notesInput) notesInput.value = log.notes || '';
+
+  const modal = document.getElementById('editLogModal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeEditModal() {
+  const modal = document.getElementById('editLogModal');
+  if (modal) modal.style.display = 'none';
+  editingLogId = null;
+}
+
+function handleSaveEditLog() {
+  if (!editingLogId) return;
+  const idx = logs.findIndex(l => l.id === editingLogId);
+  if (idx === -1) {
+    closeEditModal();
+    return;
+  }
+
+  const techSelect = document.getElementById('editLogTech');
+  const beltSelect = document.getElementById('editLogBelt');
+  const notesInput = document.getElementById('editLogNotes');
+
+  const chosenTech = getAllTechniques().find(t => t.id === (techSelect && techSelect.value))
+    || { id: logs[idx].techId, name: logs[idx].techName, category: logs[idx].category };
+  const belt = beltSelect && VALID_BELTS.has(beltSelect.value) ? beltSelect.value : logs[idx].belt;
+  const notes = notesInput ? notesInput.value.trim().slice(0, 280) : '';
+
+  const updated = sanitizeLog({
+    id: logs[idx].id,
+    timestamp: logs[idx].timestamp,
+    belt,
+    techId: chosenTech.id,
+    techName: chosenTech.name,
+    category: chosenTech.category,
+    notes
+  });
+  if (!updated) {
+    showToast('⚠️ Modifica non valida!');
+    return;
+  }
+
+  logs[idx] = updated;
+  saveData();
+  closeEditModal();
+  refreshAll();
+  showToast('✏️ Sottomissione aggiornata!');
 }
 
 function updateTotalHeader() {
@@ -1188,7 +1517,11 @@ function formatShortDate(isoString) {
   const d = new Date(isoString);
   if (isNaN(d.getTime())) return '';
   try {
-    return d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+    // Include the year for entries from past years
+    const opts = d.getFullYear() === new Date().getFullYear()
+      ? { day: 'numeric', month: 'short' }
+      : { day: 'numeric', month: 'short', year: 'numeric' };
+    return d.toLocaleDateString('it-IT', opts);
   } catch (e) {
     return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   }

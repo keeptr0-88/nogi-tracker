@@ -14,6 +14,8 @@ const TECHNIQUES = [
   { id: 'triangle', name: 'Triangolo (Frontale)', category: 'chokes', tag: 'Strangolamento' },
   { id: 'arm_triangle', name: 'Arm Triangle (Kata Gatame)', category: 'chokes', tag: 'Strangolamento' },
   { id: 'north_south', name: 'North-South Choke', category: 'chokes', tag: 'Strangolamento' },
+  { id: 'ezekiel', name: 'Ezekiel Choke', category: 'chokes', tag: 'Strangolamento' },
+  { id: 'ezekiel_one_arm', name: 'One-Arm Ezekiel Choke', category: 'chokes', tag: 'Strangolamento' },
   { id: 'buggy', name: 'Buggy Choke', category: 'chokes', tag: 'Strangolamento' },
   { id: 'von_flue', name: 'Von Flue Choke', category: 'chokes', tag: 'Strangolamento' },
 
@@ -152,6 +154,13 @@ function loadData() {
     logs = savedLogs ? JSON.parse(savedLogs) : [];
     const savedCustom = localStorage.getItem(CUSTOM_TECH_KEY);
     customTechs = savedCustom ? JSON.parse(savedCustom) : [];
+    
+    // Rimuovi choke custom aggiunti in precedenza se presenti
+    const initialLen = customTechs.length;
+    customTechs = customTechs.filter(t => t.category !== 'chokes');
+    if (customTechs.length !== initialLen) {
+      saveData();
+    }
   } catch (e) {
     console.error('Error loading LocalStorage:', e);
     logs = [];
@@ -207,10 +216,15 @@ function setupEventListeners() {
     submitBtn.addEventListener('click', handleLogSubmission);
   }
 
-  // Custom technique quick add
+  // Custom technique quick add & clear
   const addCustomBtn = document.getElementById('addCustomTechBtn');
   if (addCustomBtn) {
     addCustomBtn.addEventListener('click', handleAddCustomTechnique);
+  }
+
+  const clearAllCustomBtn = document.getElementById('clearAllCustomBtn');
+  if (clearAllCustomBtn) {
+    clearAllCustomBtn.addEventListener('click', handleClearAllCustomTechniques);
   }
 
   // Backup actions
@@ -262,12 +276,22 @@ function renderTechniques() {
   filtered.forEach(tech => {
     const btn = document.createElement('button');
     btn.type = 'button';
+    const isCustom = tech.id.startsWith('custom_');
     btn.className = `tech-btn ${selectedTech && selectedTech.id === tech.id ? 'selected' : ''}`;
     btn.innerHTML = `
-      <span>${tech.name}</span>
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
+        <span>${tech.name}</span>
+        ${isCustom ? `<span class="delete-custom-tech" title="Elimina tecnica" data-id="${tech.id}" style="color: #F87171; font-size: 0.72rem; padding: 2px 6px; background: rgba(239, 68, 68, 0.25); border-radius: 6px; font-weight: 800; border: 1px solid #EF4444;">✕ Rimuovi</span>` : ''}
+      </div>
       <span class="tech-tag">${tech.tag || getCategoryLabel(tech.category)}</span>
     `;
-    btn.addEventListener('click', () => {
+
+    btn.addEventListener('click', (e) => {
+      if (e.target.classList.contains('delete-custom-tech')) {
+        e.stopPropagation();
+        handleDeleteCustomTechnique(tech.id);
+        return;
+      }
       document.querySelectorAll('.tech-btn').forEach(b => b.classList.remove('selected'));
       btn.classList.add('selected');
       selectedTech = tech;
@@ -275,6 +299,30 @@ function renderTechniques() {
     });
     container.appendChild(btn);
   });
+}
+
+function handleDeleteCustomTechnique(id) {
+  customTechs = customTechs.filter(t => t.id !== id);
+  if (selectedTech && selectedTech.id === id) {
+    selectedTech = null;
+  }
+  saveData();
+  renderTechniques();
+  showToast('🗑️ Tecnica personalizzata rimossa');
+}
+
+function handleClearAllCustomTechniques() {
+  if (customTechs.length === 0) {
+    showToast('Nessuna mossa custom salvata.');
+    return;
+  }
+  if (confirm('Vuoi davvero rimuovere tutte le mosse personalizzate salvate?')) {
+    customTechs = [];
+    selectedTech = null;
+    saveData();
+    renderTechniques();
+    showToast('🧹 Tutte le mosse custom sono state rimosse');
+  }
 }
 
 function getCategoryLabel(cat) {

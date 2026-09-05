@@ -359,6 +359,21 @@ body {
   transform: scale(0.96);
 }
 
+.tech-btn:focus-visible,
+.belt-btn:focus-visible,
+.cat-chip:focus-visible,
+.tab-btn:focus-visible,
+.btn-primary:focus-visible,
+.btn-delete-log:focus-visible,
+.delete-custom-tech:focus-visible {
+  outline: 2px solid #38BDF8;
+  outline-offset: 2px;
+}
+
+.delete-custom-tech:hover {
+  background: rgba(239, 68, 68, 0.45);
+}
+
 .tech-btn.selected {
   background: rgba(239, 68, 68, 0.16);
   border-color: var(--accent-red);
@@ -665,4 +680,13 @@ body {
   font-size: 3rem;
   margin-bottom: 12px;
   opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -4,8 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>SUB·LOG | No-Gi Grappling Tracker</title>
+  <meta name="description" content="Tracker personale per finalizzazioni e cinture sottomesse nel Grappling No-Gi. Funziona offline.">
   
   <!-- iOS PWA Meta Tags -->
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="SUB-LOG">
@@ -80,11 +82,12 @@
         </div>
 
         <!-- Filter Chips -->
-        <div class="category-filter">
+        <div class="category-filter" role="tablist" aria-label="Filtra per categoria">
           <button type="button" class="cat-chip active" data-category="all">Tutte</button>
           <button type="button" class="cat-chip" data-category="chokes">Strangolamenti</button>
           <button type="button" class="cat-chip" data-category="leglocks">Leg Locks</button>
           <button type="button" class="cat-chip" data-category="armlocks">Leve Braccia</button>
+          <button type="button" class="cat-chip" data-category="custom">Custom</button>
         </div>
 
         <!-- Techniques Grid -->
@@ -97,10 +100,11 @@
           </summary>
           <div style="display: flex; gap: 8px; margin-top: 6px;">
             <input type="text" id="customTechInput" class="text-input" placeholder="Es. Twister, Z-Lock, Aoki Lock..." style="padding: 8px 12px; font-size: 0.82rem;">
-            <select id="customTechCat" class="text-input" style="width: auto; padding: 8px; font-size: 0.8rem;">
+            <select id="customTechCat" class="text-input" style="width: auto; padding: 8px; font-size: 0.8rem;" aria-label="Categoria mossa personalizzata">
               <option value="chokes">Choke</option>
               <option value="leglocks">Leg</option>
               <option value="armlocks">Leva</option>
+              <option value="custom" selected>Custom</option>
             </select>
             <button type="button" id="addCustomTechBtn" class="cat-chip" style="background: var(--accent-red); color: #FFF; border: none; font-weight: 800;">
               Salva
@@ -204,6 +208,10 @@
           <div style="display: flex; justify-content: space-between;">
             <span style="color: var(--text-secondary);">Leve Braccia:</span>
             <strong id="statArmsCount">0 (0%)</strong>
+          </div>
+          <div id="statOtherRow" style="display: none; justify-content: space-between;">
+            <span style="color: var(--text-secondary);">Custom / Altre:</span>
+            <strong id="statOtherCount">0 (0%)</strong>
           </div>
         </div>
       </div>
@@ -354,7 +362,7 @@
   </div>
 
   <!-- Sync Modal -->
-  <div id="syncModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 2000; align-items: center; justify-content: center; padding: 20px;">
+  <div id="syncModal" role="dialog" aria-modal="true" aria-label="Sincronizza con iPhone" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 2000; align-items: center; justify-content: center; padding: 20px;">
     <div style="background: #0F172A; border: 1px solid #334155; border-radius: 24px; max-width: 360px; width: 100%; padding: 24px; text-align: center; position: relative; box-shadow: 0 20px 50px rgba(0,0,0,0.85);">
       <button type="button" id="closeSyncModalBtn" style="position: absolute; top: 12px; right: 16px; background: none; border: none; color: #94A3B8; font-size: 1.8rem; cursor: pointer; line-height: 1;">&times;</button>
       

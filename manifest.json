@@ -2,17 +2,20 @@
   "name": "SUB-LOG | No-Gi Tap Tracker",
   "short_name": "SUB-LOG",
   "description": "Tracker personale per finalizzazioni e cinture sottomesse nel Grappling No-Gi",
+  "id": "./",
+  "scope": "./",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#090D16",
-  "theme_color": "#090D16",
+  "background_color": "#080C14",
+  "theme_color": "#080C14",
   "orientation": "portrait",
+  "categories": ["sports", "health", "utilities"],
   "icons": [
     {
       "src": "./icons/icon.svg",
-      "sizes": "192x192 512x512",
+      "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }

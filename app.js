@@ -126,9 +126,48 @@ const BADGES_CONFIG = [
   }
 ];
 
+const VALID_BELTS = new Set(['white', 'blue', 'purple', 'brown', 'black']);
+const VALID_CATEGORIES = new Set(['chokes', 'leglocks', 'armlocks', 'custom']);
+
 // --- State Management ---
 const STORAGE_KEY = 'sublog_nogi_logs_v1';
 const CUSTOM_TECH_KEY = 'sublog_custom_techs_v1';
+const MAX_SYNC_URL_LENGTH = 6000;
+
+function generateId(prefix) {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return prefix + '_' + crypto.randomUUID();
+    }
+  } catch (_) { /* fall through */ }
+  return prefix + '_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e9).toString(36);
+}
+
+function sanitizeLog(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const id = typeof entry.id === 'string' && entry.id ? entry.id : generateId('log');
+  const belt = VALID_BELTS.has(entry.belt) ? entry.belt : null;
+  if (!belt) return null;
+  const techId = typeof entry.techId === 'string' && entry.techId ? entry.techId : 'unknown';
+  const techName = typeof entry.techName === 'string' && entry.techName.trim() ? entry.techName.trim().slice(0, 80) : 'Tecnica sconosciuta';
+  const category = VALID_CATEGORIES.has(entry.category) ? entry.category : 'custom';
+  let timestamp = entry.timestamp;
+  const d = new Date(timestamp);
+  if (isNaN(d.getTime())) timestamp = new Date().toISOString();
+  const notes = typeof entry.notes === 'string' ? entry.notes.slice(0, 280) : '';
+  return { id, timestamp, belt, techId, techName, category, notes };
+}
+
+function sanitizeCustomTech(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const id = typeof entry.id === 'string' && entry.id.startsWith('custom_') ? entry.id : null;
+  if (!id) return null;
+  const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim().slice(0, 80) : null;
+  if (!name) return null;
+  const category = VALID_CATEGORIES.has(entry.category) ? entry.category : 'custom';
+  const tag = typeof entry.tag === 'string' && entry.tag ? entry.tag.slice(0, 30) : 'Custom';
+  return { id, name, category, tag };
+}
 
 let logs = [];
 let customTechs = [];
@@ -150,21 +189,27 @@ function init() {
 }
 
 function loadData() {
+  // Parse logs and custom techs independently so one corrupt key
+  // doesn't wipe out the other. Sanitize everything from storage.
   try {
     const savedLogs = localStorage.getItem(STORAGE_KEY);
-    logs = savedLogs ? JSON.parse(savedLogs) : [];
-    const savedCustom = localStorage.getItem(CUSTOM_TECH_KEY);
-    customTechs = savedCustom ? JSON.parse(savedCustom) : [];
-    
-    // Rimuovi choke custom aggiunti in precedenza se presenti
-    const initialLen = customTechs.length;
-    customTechs = customTechs.filter(t => t.category !== 'chokes');
-    if (customTechs.length !== initialLen) {
-      saveData();
-    }
+    const parsedLogs = savedLogs ? JSON.parse(savedLogs) : [];
+    logs = Array.isArray(parsedLogs)
+      ? parsedLogs.map(sanitizeLog).filter(Boolean)
+      : [];
   } catch (e) {
-    console.error('Error loading LocalStorage:', e);
+    console.error('Error loading logs from LocalStorage:', e);
     logs = [];
+  }
+
+  try {
+    const savedCustom = localStorage.getItem(CUSTOM_TECH_KEY);
+    const parsedCustom = savedCustom ? JSON.parse(savedCustom) : [];
+    customTechs = Array.isArray(parsedCustom)
+      ? parsedCustom.map(sanitizeCustomTech).filter(Boolean)
+      : [];
+  } catch (e) {
+    console.error('Error loading custom techs from LocalStorage:', e);
     customTechs = [];
   }
 }
@@ -175,7 +220,18 @@ function saveData() {
     localStorage.setItem(CUSTOM_TECH_KEY, JSON.stringify(customTechs));
   } catch (e) {
     console.error('Error saving LocalStorage:', e);
+    if (e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+      showToast('⚠️ Memoria piena: impossibile salvare. Esporta un backup!');
+    }
   }
+}
+
+function refreshAll() {
+  updateTotalHeader();
+  renderStats();
+  renderBadges();
+  renderFeed();
+  renderTechniques();
 }
 
 // --- Event Listeners ---
@@ -308,31 +364,70 @@ function renderTechniques() {
 
   container.innerHTML = '';
 
-  filtered.forEach(tech => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    const isCustom = tech.id.startsWith('custom_');
-    btn.className = `tech-btn ${selectedTech && selectedTech.id === tech.id ? 'selected' : ''}`;
-    btn.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
-        <span>${tech.name}</span>
-        ${isCustom ? `<span class="delete-custom-tech" title="Elimina tecnica" data-id="${tech.id}" style="color: #F87171; font-size: 0.72rem; padding: 2px 6px; background: rgba(239, 68, 68, 0.25); border-radius: 6px; font-weight: 800; border: 1px solid #EF4444;">✕ Rimuovi</span>` : ''}
-      </div>
-      <span class="tech-tag">${tech.tag || getCategoryLabel(tech.category)}</span>
-    `;
+  if (filtered.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'grid-column: 1 / -1; text-align: center; color: var(--text-muted); font-size: 0.82rem; padding: 16px;';
+    empty.textContent = 'Nessuna tecnica in questa categoria.';
+    container.appendChild(empty);
+    return;
+  }
 
-    btn.addEventListener('click', (e) => {
-      if (e.target.classList.contains('delete-custom-tech')) {
+  filtered.forEach(tech => {
+    const techId = typeof tech.id === 'string' ? tech.id : '';
+    const isCustom = techId.startsWith('custom_');
+    const isSelected = selectedTech && selectedTech.id === techId;
+
+    // Wrapper div (a <button> cannot legally contain another button)
+    const wrap = document.createElement('div');
+    wrap.className = `tech-btn${isSelected ? ' selected' : ''}`;
+    wrap.setAttribute('role', 'button');
+    wrap.setAttribute('tabindex', '0');
+
+    const topRow = document.createElement('div');
+    topRow.style.cssText = 'display: flex; justify-content: space-between; align-items: flex-start; width: 100%; gap: 8px;';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = tech.name || 'Tecnica senza nome';
+
+    topRow.appendChild(nameSpan);
+
+    if (isCustom) {
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'delete-custom-tech';
+      del.dataset.id = techId;
+      del.title = 'Elimina tecnica';
+      del.setAttribute('aria-label', `Rimuovi ${tech.name}`);
+      del.style.cssText = 'color: #F87171; font-size: 0.72rem; padding: 2px 6px; background: rgba(239, 68, 68, 0.25); border-radius: 6px; font-weight: 800; border: 1px solid #EF4444; cursor: pointer; flex-shrink: 0;';
+      del.textContent = '✕ Rimuovi';
+      del.addEventListener('click', (e) => {
         e.stopPropagation();
-        handleDeleteCustomTechnique(tech.id);
-        return;
-      }
-      document.querySelectorAll('.tech-btn').forEach(b => b.classList.remove('selected'));
-      btn.classList.add('selected');
+        handleDeleteCustomTechnique(techId);
+      });
+      topRow.appendChild(del);
+    }
+
+    const tagSpan = document.createElement('span');
+    tagSpan.className = 'tech-tag';
+    tagSpan.textContent = tech.tag || getCategoryLabel(tech.category);
+
+    wrap.appendChild(topRow);
+    wrap.appendChild(tagSpan);
+
+    const selectTech = () => {
+      container.querySelectorAll('.tech-btn').forEach(b => b.classList.remove('selected'));
+      wrap.classList.add('selected');
       selectedTech = tech;
       triggerHaptic();
+    };
+    wrap.addEventListener('click', selectTech);
+    wrap.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        selectTech();
+      }
     });
-    container.appendChild(btn);
+    container.appendChild(wrap);
   });
 }
 
@@ -373,51 +468,70 @@ function getCategoryLabel(cat) {
 function handleAddCustomTechnique() {
   const input = document.getElementById('customTechInput');
   const catSelect = document.getElementById('customTechCat');
-  const name = input ? input.value.trim() : '';
-  const category = catSelect ? catSelect.value : 'custom';
+  const rawName = input ? input.value.trim() : '';
+  let category = catSelect ? catSelect.value : 'custom';
+  if (!VALID_CATEGORIES.has(category)) category = 'custom';
 
-  if (!name) {
+  if (!rawName) {
     showToast('⚠️ Inserisci il nome della tecnica!');
     return;
   }
 
-  const id = 'custom_' + Date.now();
+  const name = rawName.slice(0, 80);
+
+  // Avoid exact-duplicate names (case-insensitive)
+  const allNames = new Set(getAllTechniques().map(t => (t.name || '').toLowerCase()));
+  if (allNames.has(name.toLowerCase())) {
+    showToast('⚠️ Questa tecnica esiste già!');
+    return;
+  }
+
+  const id = generateId('custom');
   const newTech = { id, name, category, tag: 'Custom' };
   customTechs.push(newTech);
   saveData();
 
-  input.value = '';
-  showToast(`✅ "${name}" aggiunta all'arsenale!`);
+  if (input) input.value = '';
+
+  // Make sure the new technique is visible even if a filter was active
+  if (currentCategory !== 'all' && currentCategory !== category) {
+    currentCategory = 'all';
+    document.querySelectorAll('.cat-chip').forEach(c => {
+      c.classList.toggle('active', c.dataset.category === 'all');
+    });
+  }
+
   selectedTech = newTech;
   renderTechniques();
+  showToast(`✅ "${name}" aggiunta all'arsenale!`);
 }
 
 // --- Handle Submission Log ---
 function handleLogSubmission() {
-  if (!selectedBelt) {
+  if (!selectedBelt || !VALID_BELTS.has(selectedBelt)) {
     showToast('⚠️ Seleziona la cintura del tuo avversario!');
     triggerHaptic(true);
     return;
   }
 
-  if (!selectedTech) {
+  if (!selectedTech || !selectedTech.id || !selectedTech.name) {
     showToast('⚠️ Seleziona la finalizzazione che hai messo a segno!');
     triggerHaptic(true);
     return;
   }
 
   const notesInput = document.getElementById('rollNotesInput');
-  const notes = notesInput ? notesInput.value.trim() : '';
+  const notes = notesInput ? notesInput.value.trim().slice(0, 280) : '';
 
   const previousBadges = getUnlockedBadgesCount();
 
   const newLog = {
-    id: 'log_' + Date.now(),
+    id: generateId('log'),
     timestamp: new Date().toISOString(),
     belt: selectedBelt,
     techId: selectedTech.id,
-    techName: selectedTech.name,
-    category: selectedTech.category,
+    techName: String(selectedTech.name).slice(0, 80),
+    category: VALID_CATEGORIES.has(selectedTech.category) ? selectedTech.category : 'custom',
     notes: notes
   };
 
@@ -432,10 +546,7 @@ function handleLogSubmission() {
   selectedTech = null;
 
   triggerHaptic();
-  updateTotalHeader();
-  renderStats();
-  renderBadges();
-  renderFeed();
+  refreshAll();
 
   // Toast confirmation
   showToast(`🥋 +1 KILL REGISTRATA! (${newLog.techName})`);
@@ -458,15 +569,19 @@ function renderStats() {
   const statTotal = document.getElementById('statTotalKills');
   if (statTotal) statTotal.textContent = total;
 
-  // Signature submission
+  // Signature submission (count by stable techId, display stored name)
   const techCounts = {};
   logs.forEach(l => {
-    techCounts[l.techName] = (techCounts[l.techName] || 0) + 1;
+    const key = l.techId || l.techName;
+    if (!techCounts[key]) techCounts[key] = { count: 0, name: l.techName };
+    techCounts[key].count++;
+    // Keep the most recent display name for this id
+    techCounts[key].name = l.techName;
   });
 
   let topTechName = 'N/A';
   let topTechCount = 0;
-  Object.entries(techCounts).forEach(([name, count]) => {
+  Object.values(techCounts).forEach(({ name, count }) => {
     if (count > topTechCount) {
       topTechName = name;
       topTechCount = count;
@@ -500,18 +615,26 @@ function renderStats() {
     if (barEl) barEl.style.width = `${pct}%`;
   });
 
-  // Category distribution
+  // Category distribution (custom/other kept explicit so % always sums to 100)
   const chokesCount = logs.filter(l => l.category === 'chokes').length;
   const legsCount = logs.filter(l => l.category === 'leglocks').length;
   const armsCount = logs.filter(l => l.category === 'armlocks').length;
+  const otherCount = Math.max(0, total - chokesCount - legsCount - armsCount);
 
   const chokesEl = document.getElementById('statChokesCount');
   const legsEl = document.getElementById('statLegsCount');
   const armsEl = document.getElementById('statArmsCount');
+  const otherEl = document.getElementById('statOtherCount');
 
-  if (chokesEl) chokesEl.textContent = `${chokesCount} (${total ? Math.round(chokesCount/total*100) : 0}%)`;
-  if (legsEl) legsEl.textContent = `${legsCount} (${total ? Math.round(legsCount/total*100) : 0}%)`;
-  if (armsEl) armsEl.textContent = `${armsCount} (${total ? Math.round(armsCount/total*100) : 0}%)`;
+  const pctOf = (n) => total ? Math.round(n / total * 100) : 0;
+  if (chokesEl) chokesEl.textContent = `${chokesCount} (${pctOf(chokesCount)}%)`;
+  if (legsEl) legsEl.textContent = `${legsCount} (${pctOf(legsCount)}%)`;
+  if (armsEl) armsEl.textContent = `${armsCount} (${pctOf(armsCount)}%)`;
+  if (otherEl) {
+    otherEl.textContent = `${otherCount} (${pctOf(otherCount)}%)`;
+    const otherRow = document.getElementById('statOtherRow');
+    if (otherRow) otherRow.style.display = otherCount > 0 ? 'flex' : 'none';
+  }
 }
 
 // --- Badges Rendering ---
@@ -529,12 +652,24 @@ function renderBadges() {
     const isUnlocked = badge.check(logs);
     const card = document.createElement('div');
     card.className = `badge-card ${isUnlocked ? 'unlocked' : 'locked'}`;
-    card.innerHTML = `
-      <div class="badge-icon">${badge.icon}</div>
-      <div class="badge-title">${badge.title}</div>
-      <div class="badge-desc">${badge.desc}</div>
-      <div class="badge-status">${isUnlocked ? 'SBLOCCATO' : 'IN CORSO'}</div>
-    `;
+
+    const icon = document.createElement('div');
+    icon.className = 'badge-icon';
+    icon.textContent = badge.icon;
+
+    const title = document.createElement('div');
+    title.className = 'badge-title';
+    title.textContent = badge.title;
+
+    const desc = document.createElement('div');
+    desc.className = 'badge-desc';
+    desc.textContent = badge.desc;
+
+    const status = document.createElement('div');
+    status.className = 'badge-status';
+    status.textContent = isUnlocked ? 'SBLOCCATO' : 'IN CORSO';
+
+    card.append(icon, title, desc, status);
     container.appendChild(card);
   });
 }
@@ -545,56 +680,78 @@ function renderFeed() {
   if (!container) return;
 
   if (logs.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state-icon">🥋</div>
-        <p>Nessun tap registrato finora.</p>
-        <p style="font-size: 0.8rem; margin-top: 6px;">Vai nella scheda "Log" e registra la tua prima sottomissione!</p>
-      </div>
-    `;
+    container.innerHTML = '';
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    const icon = document.createElement('div');
+    icon.className = 'empty-state-icon';
+    icon.textContent = '🥋';
+    const p1 = document.createElement('p');
+    p1.textContent = 'Nessun tap registrato finora.';
+    const p2 = document.createElement('p');
+    p2.style.cssText = 'font-size: 0.8rem; margin-top: 6px;';
+    p2.textContent = 'Vai nella scheda "Log" e registra la tua prima sottomissione!';
+    empty.append(icon, p1, p2);
+    container.appendChild(empty);
     return;
   }
 
   container.innerHTML = '';
+  const fragment = document.createDocumentFragment();
 
   logs.forEach(log => {
     const item = document.createElement('div');
     item.className = 'feed-item';
 
-    const beltObj = BELTS.find(b => b.id === log.belt) || { label: log.belt, color: '#334155' };
+    const beltObj = BELTS.find(b => b.id === log.belt) || { name: 'Sconosciuta', label: '❓ Sconosciuta', color: '#334155' };
     const dateFormatted = formatShortDate(log.timestamp);
 
-    item.innerHTML = `
-      <div class="feed-item-left">
-        <div class="feed-belt-pill" style="background: ${beltObj.color};"></div>
-        <div class="feed-info">
-          <span class="feed-tech-name">${log.techName}</span>
-          <span class="feed-meta">vs ${beltObj.label} • ${dateFormatted} ${log.notes ? '• ' + escapeHtml(log.notes) : ''}</span>
-        </div>
-      </div>
-      <button class="btn-delete-log" title="Elimina log" data-id="${log.id}">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="3 6 5 6 21 6"></polyline>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-        </svg>
-      </button>
-    `;
+    const left = document.createElement('div');
+    left.className = 'feed-item-left';
 
-    const delBtn = item.querySelector('.btn-delete-log');
+    const pill = document.createElement('div');
+    pill.className = 'feed-belt-pill';
+    pill.style.background = beltObj.color || '#334155';
+
+    const info = document.createElement('div');
+    info.className = 'feed-info';
+
+    const techName = document.createElement('span');
+    techName.className = 'feed-tech-name';
+    techName.textContent = log.techName || 'Tecnica sconosciuta';
+
+    const meta = document.createElement('span');
+    meta.className = 'feed-meta';
+    meta.textContent = `vs ${beltObj.label || beltObj.name || log.belt} • ${dateFormatted}${log.notes ? ' • ' + log.notes : ''}`;
+
+    info.append(techName, meta);
+    left.append(pill, info);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn-delete-log';
+    delBtn.type = 'button';
+    delBtn.title = 'Elimina log';
+    delBtn.setAttribute('aria-label', `Elimina ${log.techName}`);
+    delBtn.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      </svg>
+    `;
     delBtn.addEventListener('click', () => handleDeleteLog(log.id));
 
-    container.appendChild(item);
+    item.append(left, delBtn);
+    fragment.appendChild(item);
   });
+
+  container.appendChild(fragment);
 }
 
 function handleDeleteLog(id) {
   if (confirm('Sei sicuro di voler eliminare questa sottomissione dal registro?')) {
     logs = logs.filter(l => l.id !== id);
     saveData();
-    updateTotalHeader();
-    renderStats();
-    renderBadges();
-    renderFeed();
+    refreshAll();
     showToast('🗑️ Sottomissione rimossa.');
   }
 }
@@ -626,31 +783,44 @@ function exportDataToFile() {
 }
 
 function importDataFromFile(e) {
-  const file = e.target.files[0];
+  const file = e.target.files && e.target.files[0];
   if (!file) return;
 
   const reader = new FileReader();
   reader.onload = function(event) {
     try {
       const parsed = JSON.parse(event.target.result);
-      if (Array.isArray(parsed.logs)) {
-        logs = parsed.logs;
-        if (Array.isArray(parsed.customTechniques)) {
-          customTechs = parsed.customTechniques;
-        }
-        saveData();
-        updateTotalHeader();
-        renderStats();
-        renderBadges();
-        renderFeed();
-        renderTechniques();
-        showToast(`✅ Ripristinati ${logs.length} tap con successo!`);
-      } else {
-        alert('Formato file non valido!');
+      const rawLogs = Array.isArray(parsed.logs) ? parsed.logs : (Array.isArray(parsed) ? parsed : null);
+      if (!rawLogs) {
+        showToast('⚠️ Formato file non valido!');
+        return;
       }
+      const cleanLogs = rawLogs.map(sanitizeLog).filter(Boolean);
+      const rawTechs = Array.isArray(parsed.customTechniques)
+        ? parsed.customTechniques
+        : (Array.isArray(parsed.customTechs) ? parsed.customTechs : []);
+      const cleanTechs = rawTechs.map(sanitizeCustomTech).filter(Boolean);
+
+      const droppedLogs = rawLogs.length - cleanLogs.length;
+      logs = cleanLogs;
+      customTechs = cleanTechs;
+      // Keep newest-first ordering
+      logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      saveData();
+      selectedTech = null;
+      refreshAll();
+      showToast(`✅ Ripristinati ${logs.length} tap con successo!${droppedLogs > 0 ? ` (${droppedLogs} record non validi ignorati)` : ''}`);
     } catch (err) {
-      alert('Errore nella lettura del file JSON di backup.');
+      console.error('Errore lettura backup:', err);
+      showToast('⚠️ Errore nella lettura del file JSON di backup.');
+    } finally {
+      // Allow re-importing the same file twice
+      e.target.value = '';
     }
+  };
+  reader.onerror = () => {
+    showToast('⚠️ Impossibile leggere il file.');
+    e.target.value = '';
   };
   reader.readAsText(file);
 }
@@ -659,12 +829,10 @@ function handleClearData() {
   if (confirm('⚠️ ATTENZIONE: Vuoi davvero cancellare TUTTI i tuoi dati e ricominciare da zero?')) {
     logs = [];
     customTechs = [];
+    selectedBelt = null;
+    selectedTech = null;
     saveData();
-    updateTotalHeader();
-    renderStats();
-    renderBadges();
-    renderFeed();
-    renderTechniques();
+    refreshAll();
     showToast('🧹 Tutti i dati sono stati cancellati.');
   }
 }
@@ -672,19 +840,52 @@ function handleClearData() {
 // --- QR / Device Synchronization Engine ---
 function encodeSyncPayload(data) {
   const json = JSON.stringify(data);
-  const b64 = btoa(encodeURIComponent(json).replace(/%([0-9A-F]{2})/g, (match, p1) => {
-    return String.fromCharCode('0x' + p1);
-  }));
+  const bytes = new TextEncoder().encode(json);
+  let binary = '';
+  bytes.forEach(b => { binary += String.fromCharCode(b); });
+  const b64 = btoa(binary);
   return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function decodeSyncPayload(str) {
-  let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  if (typeof str !== 'string' || !str) throw new Error('Empty payload');
+  const clean = str.trim();
+  if (!/^[A-Za-z0-9\-_]+$/.test(clean)) throw new Error('Invalid payload characters');
+  if (clean.length > 500000) throw new Error('Payload too large');
+  let b64 = clean.replace(/-/g, '+').replace(/_/g, '/');
   while (b64.length % 4) b64 += '=';
-  const json = decodeURIComponent(Array.prototype.map.call(atob(b64), (c) => {
-    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-  }).join(''));
+  const binary = atob(b64);
+  const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+  const json = new TextDecoder().decode(bytes);
   return JSON.parse(json);
+}
+
+function extractSyncPayload(raw) {
+  const val = (raw || '').trim();
+  if (!val) return null;
+  // Try full URL parsing first (handles ?sync=, ?s=, #sync=, #s=)
+  try {
+    // Allow pasting a bare hash fragment too
+    const url = new URL(val, window.location.href);
+    const q = url.searchParams.get('sync') || url.searchParams.get('s');
+    if (q) return q.trim();
+    if (url.hash) {
+      const hm = url.hash.match(/(?:sync|s)=([^&#\s]+)/);
+      if (hm) return hm[1].trim();
+    }
+    // If it looked like a URL but had no sync param, it's not a payload
+    if (/^https?:\/\//i.test(val) || val.includes('?') || val.includes('#')) {
+      return null;
+    }
+  } catch (_) {
+    // Not a parseable URL — fall through to raw-payload handling below
+  }
+  // Raw base64url payload (may be URL-encoded if copied from address bar)
+  try {
+    return decodeURIComponent(val.split(/\s+/)[0].split('&')[0].split('#')[0]);
+  } catch (_) {
+    return val;
+  }
 }
 
 function applySyncData(data) {
@@ -693,63 +894,106 @@ function applySyncData(data) {
     return;
   }
 
-  const incomingLogs = Array.isArray(data.logs) ? data.logs : data;
+  const rawLogs = Array.isArray(data.logs) ? data.logs : data;
   let addedCount = 0;
+  let droppedCount = 0;
   const existingIds = new Set(logs.map(l => l.id));
 
-  incomingLogs.forEach(newLog => {
-    if (newLog && newLog.id && !existingIds.has(newLog.id)) {
-      logs.push(newLog);
-      existingIds.add(newLog.id);
+  rawLogs.forEach(entry => {
+    const clean = sanitizeLog(entry);
+    if (!clean) {
+      droppedCount++;
+      return;
+    }
+    if (!existingIds.has(clean.id)) {
+      logs.push(clean);
+      existingIds.add(clean.id);
       addedCount++;
     }
   });
 
-  if (Array.isArray(data.customTechs)) {
+  // Accept both key namings (sync uses customTechs, file backup uses customTechniques)
+  const rawTechs = Array.isArray(data.customTechs)
+    ? data.customTechs
+    : (Array.isArray(data.customTechniques) ? data.customTechniques : []);
+  let addedTechs = 0;
+  if (rawTechs.length > 0) {
     const existingTechIds = new Set(customTechs.map(t => t.id));
-    data.customTechs.forEach(t => {
-      if (t && t.id && !existingTechIds.has(t.id)) {
-        customTechs.push(t);
-        existingTechIds.add(t.id);
+    rawTechs.forEach(entry => {
+      const clean = sanitizeCustomTech(entry);
+      if (clean && !existingTechIds.has(clean.id)) {
+        customTechs.push(clean);
+        existingTechIds.add(clean.id);
+        addedTechs++;
       }
     });
   }
 
   logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   saveData();
-
-  updateTotalHeader();
-  renderStats();
-  renderBadges();
-  renderFeed();
-  renderTechniques();
+  refreshAll();
   triggerHaptic();
 
-  showToast(`🎉 Sincronizzati ${addedCount} tap con successo!`);
+  showToast(`🎉 Sincronizzati ${addedCount} tap con successo!${droppedCount > 0 ? ` (${droppedCount} ignorati)` : ''}${addedTechs > 0 ? ` +${addedTechs} mosse` : ''}`);
 }
 
 function checkUrlForSyncData() {
   try {
-    const urlParams = new URLSearchParams(window.location.search);
-    let syncPayload = urlParams.get('sync') || urlParams.get('s');
-    
-    if (!syncPayload && window.location.hash) {
-      const hash = window.location.hash.slice(1);
-      const match = hash.match(/(?:sync|s)=([^&]+)/);
-      if (match) syncPayload = match[1];
-    }
+    const payload = extractSyncPayload(window.location.href);
+    // Only treat as sync when the current URL actually carries a sync param
+    const hasSyncParam = /[?#&](sync|s)=/i.test(window.location.href);
+    if (!payload || !hasSyncParam) return;
 
-    if (syncPayload) {
-      const data = decodeSyncPayload(syncPayload);
-      applySyncData(data);
+    const data = decodeSyncPayload(payload);
+    // Defer UI refresh: init() renders right after this call
+    applySyncDataWithoutRender(data);
 
-      // Clean URL bar
-      const cleanUrl = window.location.origin + window.location.pathname;
-      window.history.replaceState({}, document.title, cleanUrl);
-    }
+    // Clean URL bar (drop query + hash)
+    const cleanUrl = window.location.origin + window.location.pathname;
+    window.history.replaceState({}, document.title, cleanUrl);
   } catch (err) {
     console.error('Errore durante la decodifica del sync payload:', err);
     showToast('⚠️ Errore nel link di sincronizzazione');
+    try {
+      window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+    } catch (_) { /* ignore */ }
+  }
+}
+
+// Sync-on-load variant that doesn't touch the DOM (init renders afterwards)
+function applySyncDataWithoutRender(data) {
+  if (!data || (!Array.isArray(data.logs) && !Array.isArray(data))) {
+    showToast('⚠️ Dati di sincronizzazione non validi!');
+    return;
+  }
+  const rawLogs = Array.isArray(data.logs) ? data.logs : data;
+  const existingIds = new Set(logs.map(l => l.id));
+  let addedCount = 0;
+  rawLogs.forEach(entry => {
+    const clean = sanitizeLog(entry);
+    if (clean && !existingIds.has(clean.id)) {
+      logs.push(clean);
+      existingIds.add(clean.id);
+      addedCount++;
+    }
+  });
+  const rawTechs = Array.isArray(data.customTechs)
+    ? data.customTechs
+    : (Array.isArray(data.customTechniques) ? data.customTechniques : []);
+  if (rawTechs.length > 0) {
+    const existingTechIds = new Set(customTechs.map(t => t.id));
+    rawTechs.forEach(entry => {
+      const clean = sanitizeCustomTech(entry);
+      if (clean && !existingTechIds.has(clean.id)) {
+        customTechs.push(clean);
+        existingTechIds.add(clean.id);
+      }
+    });
+  }
+  logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  saveData();
+  if (addedCount > 0) {
+    setTimeout(() => showToast(`🎉 Sincronizzati ${addedCount} tap con successo!`), 400);
   }
 }
 
@@ -759,7 +1003,29 @@ function generateSyncUrl() {
     customTechs: customTechs
   };
   const encoded = encodeSyncPayload(payload);
-  return `https://keeptr0-88.github.io/nogi-tracker/?sync=${encoded}`;
+  // Use current origin so sync works on any host (GitHub Pages, Netlify, localhost)
+  const base = window.location.origin + window.location.pathname;
+  return `${base}?sync=${encoded}`;
+}
+
+function renderLocalQrCode(container, text) {
+  container.innerHTML = '';
+  if (typeof QRCode !== 'undefined') {
+    try {
+      new QRCode(container, {
+        text: text,
+        width: 220,
+        height: 220,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M
+      });
+      return true;
+    } catch (e) {
+      console.error('QR code generation error:', e);
+    }
+  }
+  return false;
 }
 
 function openSyncModal() {
@@ -773,39 +1039,64 @@ function openSyncModal() {
   }
 
   container.innerHTML = '';
-  const syncUrl = generateSyncUrl();
+  let syncUrl;
+  try {
+    syncUrl = generateSyncUrl();
+  } catch (e) {
+    console.error('Sync encode error:', e);
+    showToast('⚠️ Errore nella generazione del link!');
+    return;
+  }
 
-  // Create high-clarity QR Code via QRServer API (super easy for iOS camera to scan)
-  const qrImg = document.createElement('img');
-  qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=${encodeURIComponent(syncUrl)}`;
-  qrImg.alt = 'QR Code Sincronizzazione';
-  qrImg.style.width = '240px';
-  qrImg.style.height = '240px';
-  qrImg.style.display = 'block';
-  qrImg.style.borderRadius = '12px';
+  if (syncUrl.length > MAX_SYNC_URL_LENGTH) {
+    container.innerHTML = '<p style="color:#000; font-size:0.8rem; padding:10px; max-width:220px;">Troppi dati per un QR code. Usa "Copia Link" o il Backup JSON.</p>';
+    // Still store for copy button
+    modal.dataset.syncUrl = syncUrl;
+    modal.style.display = 'flex';
+    showToast('⚠️ Troppi tap per il QR: usa Copia Link o Backup JSON');
+    return;
+  }
+  modal.dataset.syncUrl = syncUrl;
 
-  // Fallback to local qrcode.min.js canvas if offline
-  qrImg.onerror = () => {
-    container.innerHTML = '';
-    if (typeof QRCode !== 'undefined') {
-      try {
-        new QRCode(container, {
-          text: syncUrl,
-          width: 220,
-          height: 220,
-          colorDark: "#000000",
-          colorLight: "#ffffff",
-          correctLevel: QRCode.CorrectLevel.L
-        });
-      } catch (e) {
-        console.error('QR code generation error:', e);
-        container.innerHTML = '<p style="color:#000; font-size:0.8rem; padding:10px;">Usa il pulsante "Copia Link" qui sotto</p>';
-      }
-    }
-  };
+  // Privacy-first: generate QR locally (offline). Remote API only as fallback.
+  const ok = renderLocalQrCode(container, syncUrl);
+  if (!ok) {
+    const qrImg = document.createElement('img');
+    qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=${encodeURIComponent(syncUrl)}`;
+    qrImg.alt = 'QR Code Sincronizzazione';
+    qrImg.style.width = '240px';
+    qrImg.style.height = '240px';
+    qrImg.style.display = 'block';
+    qrImg.style.borderRadius = '12px';
+    qrImg.onerror = () => {
+      container.innerHTML = '<p style="color:#000; font-size:0.8rem; padding:10px;">Usa il pulsante "Copia Link" qui sotto</p>';
+    };
+    container.appendChild(qrImg);
+  }
 
-  container.appendChild(qrImg);
   modal.style.display = 'flex';
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+  // Fallback for iOS Safari / non-secure contexts
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  let ok = false;
+  try {
+    ok = document.execCommand('copy');
+  } catch (_) { ok = false; }
+  document.body.removeChild(ta);
+  if (!ok) throw new Error('copy failed');
+  return true;
 }
 
 function handleCopySyncLink() {
@@ -814,21 +1105,26 @@ function handleCopySyncLink() {
     return;
   }
 
-  const syncUrl = generateSyncUrl();
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(syncUrl).then(() => {
-      const feedback = document.getElementById('syncLinkCopyFeedback');
-      if (feedback) {
-        feedback.style.display = 'block';
-        setTimeout(() => feedback.style.display = 'none', 3500);
-      }
-      showToast('📋 Link di sincronizzazione copiato!');
-    }).catch(() => {
-      prompt('Copia questo link di sincronizzazione e aprilo su iPhone:', syncUrl);
-    });
-  } else {
-    prompt('Copia questo link di sincronizzazione e aprilo su iPhone:', syncUrl);
+  let syncUrl;
+  try {
+    syncUrl = generateSyncUrl();
+  } catch (e) {
+    showToast('⚠️ Errore nella generazione del link!');
+    return;
   }
+  if (syncUrl.length > MAX_SYNC_URL_LENGTH) {
+    showToast('⚠️ Link troppo lungo: usa il Backup JSON per trasferire i dati.');
+  }
+  copyTextToClipboard(syncUrl).then(() => {
+    const feedback = document.getElementById('syncLinkCopyFeedback');
+    if (feedback) {
+      feedback.style.display = 'block';
+      setTimeout(() => { feedback.style.display = 'none'; }, 3500);
+    }
+    showToast('📋 Link di sincronizzazione copiato!');
+  }).catch(() => {
+    prompt('Copia questo link di sincronizzazione e aprilo su iPhone:', syncUrl);
+  });
 }
 
 function handleManualSyncInput() {
@@ -842,14 +1138,11 @@ function handleManualSyncInput() {
   }
 
   try {
-    let payload = val;
-    // If a full URL was pasted, extract the sync parameter
-    if (val.includes('sync=')) {
-      payload = val.split('sync=')[1].split('&')[0];
-    } else if (val.includes('s=')) {
-      payload = val.split('s=')[1].split('&')[0];
+    const payload = extractSyncPayload(val);
+    if (!payload) {
+      showToast('⚠️ Codice o link non valido!');
+      return;
     }
-
     const data = decodeSyncPayload(payload);
     applySyncData(data);
     input.value = '';
@@ -860,13 +1153,21 @@ function handleManualSyncInput() {
 }
 
 // --- Helpers ---
+const MAX_VISIBLE_TOASTS = 3;
 function showToast(message) {
   const container = document.getElementById('toastContainer');
   if (!container) return;
 
+  // Avoid toast pile-up
+  while (container.children.length >= MAX_VISIBLE_TOASTS) {
+    container.firstChild.remove();
+  }
+
   const toast = document.createElement('div');
   toast.className = 'toast';
-  toast.innerHTML = `<span>${message}</span>`;
+  const label = document.createElement('span');
+  label.textContent = String(message);
+  toast.appendChild(label);
   container.appendChild(toast);
 
   setTimeout(() => {
@@ -884,17 +1185,18 @@ function triggerHaptic(isError = false) {
 }
 
 function formatShortDate(isoString) {
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return '';
   try {
-    const d = new Date(isoString);
     return d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
   } catch (e) {
-    return '';
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   }
 }
 
 function escapeHtml(text) {
   const div = document.createElement('div');
-  div.textContent = text;
+  div.textContent = text == null ? '' : String(text);
   return div.innerHTML;
 }
 

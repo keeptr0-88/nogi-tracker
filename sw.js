@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sublog-nogi-v5';
+const CACHE_NAME = 'sublog-nogi-v6';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -33,6 +33,13 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+
+  const url = new URL(event.request.url);
+
+  // Never cache cross-origin requests (e.g. QR API) and never cache
+  // sync URLs (?sync= / ?s= / #sync=) which embed private log data.
+  if (url.origin !== self.location.origin) return;
+  if (url.searchParams.has('sync') || url.searchParams.has('s')) return;
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
